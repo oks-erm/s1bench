@@ -1,0 +1,155 @@
+'use strict';
+const data=JSON.parse(document.getElementById('report-data').textContent);
+const L=ReportLogic, content=document.getElementById('content');
+const casesById=new Map(data.cases.map(c=>[c.id,c]));
+let baseline=data.baseline, dataset='', cohort='', activeTab='Quality', volume=null;
+const fallbackLabels=new Map();
+const labels={model:'Model',dataset:'Dataset',task:'Use case',planned:'Planned cases',attempted:'Attempted',families:'Families',
+  success_rate:'Task success',success_ci_low:'Success CI low',success_ci_high:'Success CI high',delta_vs_baseline:'Gap vs reference',
+  delta_ci_low:'Gap CI low',delta_ci_high:'Gap CI high',p50_ms:'Median (ms)',p95_ms:'p95 (ms)',api_per_1k:'API cost / 1k',
+  active_hosting_per_1k:'Active hosting / 1k',active_total_per_1k:'Active total / 1k',always_on_30day_hosting:'Always-on hosting / 30 days',
+  estimated_api_cost:'Estimated API cost',monthly_api:'Monthly API cost',monthly_api_savings_vs_baseline:'Monthly API savings vs reference',
+  cost_per_correct:'Cost / correct answer',cost_coverage:'Cost coverage',rate_basis:'Price basis',input_per_million:'Input / 1M tokens',
+  output_per_million:'Output / 1M tokens',critical_failures:'Critical failures',unsafe_decisions:'Unsafe decisions',risk_exposures:'Risk exposures',
+  recommendation:'Next step',ci_method:'Interval method',macro_f1:'Macro F1',brier:'Brier score',mae:'MAE',valid_rate:'Valid answers',
+  api_errors:'API errors',invalid_answers:'Invalid answers',none_precision:'NONE precision',none_recall:'NONE recall',
+  non_none_on_none_rate:'Non-NONE on NONE',unsafe_upper95:'Unsafe upper 95%',auto_coverage:'Automatic coverage',auto_accuracy:'Automatic accuracy',
+  fallback_rate:'Fallback rate',simulated_p95_ms:'Simulated p95 (ms)',known_api_cost:'Known API cost',priced_requests:'Requests priced'};
+const ratios=new Set(['success_rate','success_ci_low','success_ci_high','valid_rate','none_precision','none_recall','non_none_on_none_rate',
+  'unsafe_upper95','auto_coverage','auto_accuracy','cost_coverage','fallback_rate','agreement','all_pairs_correct','all_runs_accuracy','valid_repeat_rate','repeat_agreement']);
+function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
+function heading(text){content.append(el('h2',text));}
+function note(text){content.append(el('p',text,'muted'));}
+function format(v,key=''){
+  if(v===null || v===undefined)return '—';
+  if(typeof v==='boolean')return v ? 'Yes':'No';
+  if(typeof v==='object')return JSON.stringify(v);
+  if(L.finite(v)){
+    if(ratios.has(key))return (v*100).toFixed(2)+'%';
+    if(key.startsWith('delta_'))return (v*100).toFixed(2)+' pp';
+    if(/cost|api|hosting|million|savings/.test(key) && !/coverage|errors/.test(key))return v.toLocaleString('en-US',{maximumFractionDigits:6});
+    return v.toLocaleString('en-US',{maximumFractionDigits:4});
+  }
+  return String(v);
+}
+function table(rows,fields,parent=content,onRow=null){
+  if(!rows.length){parent.append(el('p','No matching data.','empty'));return;}
+  fields=fields||[...new Set(rows.flatMap(r=>Object.keys(r)))];
+  const wrap=el('div',undefined,'table-wrap'), t=el('table'), head=el('thead'), tr=el('tr'), body=el('tbody');
+  let current=[...rows], ascending=true;
+  function draw(){body.replaceChildren();for(const row of current){const r=el('tr');for(const k of fields){const td=el('td');
+    if(onRow && k===fields[0]){const b=el('button',format(row[k],k));b.onclick=()=>onRow(row);td.append(b);}
+    else td.textContent=format(row[k],k);td.title=format(row[k],k);r.append(td);}body.append(r);}}
+  for(const k of fields){const th=el('th'), b=el('button',labels[k]||k.replaceAll('_',' '));b.title='Sort by '+b.textContent;
+    b.onclick=()=>{current.sort((a,c)=>{const x=a[k],y=c[k];if(x==null)return y==null?0:1;if(y==null)return -1;
+      const cmp=typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y));return ascending?cmp:-cmp;});ascending=!ascending;draw();};
+    th.append(b);tr.append(th);}
+  head.append(tr);t.append(head,body);wrap.append(t);parent.append(wrap);draw();return wrap;
+}
+function select(label,options,value,parent,onChange){const box=el('label',label,'control'), sel=el('select');sel.setAttribute('aria-label',label);
+  for(const [v,text] of options){const option=el('option',text);option.value=v;sel.append(option);}sel.value=value;
+  sel.onchange=()=>onChange(sel.value);box.append(sel);parent.append(box);return sel;
+}
+function detail(title,value,parent=content,open=false){const d=el('details');d.open=open;d.append(el('summary',title),el('pre',typeof value==='string'?value:JSON.stringify(value,null,2)));parent.append(d);}
+function key(r){return JSON.stringify([r.dataset,r.task]);}
+function summaries(){return data.summaries_by_reference[baseline];}
+function selected(){return summaries().filter(r=>key(r)===cohort);}
+function cohortParts(){return JSON.parse(cohort);}
+function records(){const [d,t]=cohortParts();return data.records.filter(r=>r.dataset===d && r.task===t);}
+function allVisible(){return summaries().filter(r=>!dataset || r.dataset===dataset);}
+function color(alias,i){return data.colors[alias]||['#0072B2','#E69F00','#009E73','#8064C9','#D55E00','#56B4E9'][i%6];}
+function chart(rows,fields,title,percent=false){
+  if(!rows.length){note('Charts require complete cohorts. See coverage in the table.');return;}
+  const wrap=el('div',undefined,'chart');wrap.append(el('h3',title));
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 960 330');svg.setAttribute('role','img');svg.setAttribute('aria-label',title);
+  function shape(tag,attrs,text){const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;svg.append(n);return n;}
+  const maximum=percent?1:Math.max(1,...rows.flatMap(r=>fields.map(f=>L.finite(r[f])?r[f]:0)))*1.1;
+  for(let i=0;i<=4;i++){const y=270-i*58;shape('line',{x1:80,y1:y,x2:940,y2:y,stroke:'#e4e8ef'});shape('text',{x:68,y:y+5,'text-anchor':'end',fill:'#657086','font-size':13},percent?(i*25)+'%':Math.round(maximum*i/4).toLocaleString());}
+  const group=840/rows.length, bw=Math.min(85,(group-24)/fields.length);
+  rows.forEach((r,i)=>{fields.forEach((f,j)=>{if(!L.finite(r[f]))return;const height=r[f]/maximum*232;
+    const bar=shape('rect',{x:90+i*group+(group-bw*fields.length)/2+j*bw,y:270-height,width:bw-4,height,rx:3,fill:fields.length===1?color(r.model,i):j===0?'#0072B2':'#E69F00'});
+    const titleNode=document.createElementNS(ns,'title');titleNode.textContent=r.model+' · '+(labels[f]||f)+': '+format(r[f],f);bar.append(titleNode);
+    shape('text',{x:90+i*group+(group-bw*fields.length)/2+j*bw+(bw-4)/2,y:Math.max(24,263-height),'text-anchor':'middle','font-size':12,fill:'#263046'},format(r[f],f));});
+    shape('text',{x:90+i*group+group/2,y:299,'text-anchor':'middle','font-size':14,fill:'#263046'},r.model);});
+  wrap.append(svg);if(fields.length>1){const legend=el('div',undefined,'legend');fields.forEach((f,i)=>{const entry=el('span'),s=el('i',undefined,'swatch');s.style.background=i===0?'#0072B2':'#E69F00';entry.append(s,document.createTextNode(labels[f]||f));legend.append(entry);});wrap.append(legend);}content.append(wrap);
+}
+function renderFilters(){
+  const parent=document.getElementById('filters');parent.replaceChildren();
+  select('Reference model',Object.keys(data.summaries_by_reference).map(x=>[x,x]),baseline,parent,v=>{baseline=v;render();});
+  const datasets=[...new Set(summaries().map(r=>r.dataset))].sort();
+  select('Dataset',[['','All datasets'],...datasets.map(x=>[x,x])],dataset,parent,v=>{dataset=v;cohort='';volume=null;render();});
+  const cohorts=[...new Map(allVisible().map(r=>[key(r),r])).entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+  if(!cohorts.some(([k])=>k===cohort))cohort=cohorts[0]?.[0]||'';
+  select('Inspect one use case',cohorts.map(([k,r])=>[k,r.dataset+' / '+r.task]),cohort,parent,v=>{cohort=v;volume=null;render();});
+}
+function overview(){heading('Business decision matrix');note('All use cases in the selected dataset. Every tab and case is included in this file, regardless of the view selected when it was exported.');
+  table(allVisible(),['dataset','task','model','requested_model','effort','status','success_rate','delta_vs_baseline','delta_ci_low','delta_ci_high',
+    'p95_ms','api_per_1k','currency','cost_coverage','critical_failures','unsafe_decisions','risk_exposures','attempted','families','recommendation']);}
+function quality(){heading('Quality');chart(selected().filter(r=>r.status==='complete'),['success_rate'],'Task success on complete matched cohorts',true);
+  table(selected(),['model','planned','attempted','families','success_rate','success_ci_low','success_ci_high','ci_method','macro_f1','brier','mae','valid_rate','api_errors','invalid_answers',
+    'none_precision','none_recall','non_none_on_none_rate','unsafe_decisions','risk_exposures','unsafe_upper95','risk_direction','auto_coverage','auto_accuracy']);
+  note('Critical failures are test failures, not measured production harm. Missing values (—) are unavailable, not zero.');
+  const [d,t]=cohortParts();content.append(el('h3','Repeat consistency'));table(data.stability.filter(r=>r.dataset===d && r.task===t));
+  content.append(el('h3','Paired robustness checks'));table(data.robustness.filter(r=>r.task===t));}
+function latency(){heading('Latency');chart(selected().filter(r=>r.status==='complete'),['p50_ms','p95_ms'],'Client latency, milliseconds');
+  table(selected(),['model','p50_ms','p95_ms','attempt_p95_ms','timed_completed','api_errors']);note('Sequential client timings after warm-up; this is not a concurrent throughput test.');}
+function cost(){heading('Cost and forecast');content.append(el('h3','Estimated API cost for the complete run'));
+  table(data.cost_totals,['model','requests','priced_requests','estimated_api_cost','known_api_cost','currency','input_per_million','output_per_million','rate_basis']);
+  note('Includes all use cases, warm-ups and repeats. Rate-based estimates, not provider invoices. Unknown charges stay unknown. Local API fees exclude hardware and electricity.');
+  const [,task]=cohortParts(), policy={...data.business,...(data.business.use_cases||{})[task]};
+  if(volume===null)volume=policy.monthly_volume??100000;
+  const controls=el('div',undefined,'filters'),box=el('label','Monthly requests for this use case','control'),input=el('input');input.type='number';input.min='0';input.step='1';input.value=volume;box.append(input);controls.append(box);content.append(controls);
+  const forecast=el('div');content.append(forecast);
+  function draw(){forecast.replaceChildren();const rows=selected().map(r=>({...r,
+      monthly_api:r.status==='complete' && r.cost_coverage===1 && L.finite(r.api_per_1k)?r.api_per_1k/1000*volume:null}));
+    const ref=rows.find(r=>r.model===baseline);for(const r of rows)r.monthly_api_savings_vs_baseline=r.model!==baseline && ref && r.currency===ref.currency && L.finite(r.monthly_api) && L.finite(ref.monthly_api)?ref.monthly_api-r.monthly_api:null;
+    table(rows,['model','api_per_1k','cost_per_correct','cost_coverage','active_hosting_per_1k','active_total_per_1k','monthly_api','monthly_api_savings_vs_baseline','always_on_30day_hosting','currency','rate_basis'],forecast);}
+  input.oninput=()=>{const v=Number(input.value);if(input.value!=='' && Number.isFinite(v) && v>=0){volume=v;draw();}};draw();
+  note('Prices and hosting rates are captured at export. Change volume to explore a forecast; this does not change historical spend or quality. Active hosting uses serial execution time. Always-on hosting assumes 720 hours. Blank local hosting means no hourly estimate was supplied.');}
+function fallback(){heading('Fallback scenario');const [d,t]=cohortParts(), rs=records();
+  const options=[...new Set(rs.filter(r=>L.primary(r)&&r.type==='choice'&&r.valid).map(r=>r.decision))].sort();
+  if(!fallbackLabels.has(cohort))fallbackLabels.set(cohort,new Set(options.filter(x=>['NONE','CLARIFY','ESCALATE'].includes(x))));
+  const chosen=fallbackLabels.get(cohort),controls=el('fieldset'),legend=el('legend','Also fall back on these explicit choice labels');controls.append(legend);
+  const out=el('div');const draw=()=>{out.replaceChildren();table(L.fallback(data.records,summaries(),d,t,baseline,chosen),null,out);};
+  for(const option of options){const label=el('label'),check=el('input');check.type='checkbox';check.checked=chosen.has(option);check.onchange=()=>{check.checked?chosen.add(option):chosen.delete(option);draw();};label.append(check,document.createTextNode(option));controls.append(label);}
+  if(!options.length)controls.append(el('p','No categorical labels for this use case. Invalid answers and API errors still trigger fallback.'));
+  content.append(controls,out);draw();note('Offline replay using the selected reference model. Invalid answers and API failures always fall back. Requires complete matched cases in the same currency. Costs and latencies add serially; no model calls are made.');}
+function confusion(){heading('Confusion matrices');note('Rows are expected labels; columns are predictions. Primary attempts only. Missing requests are not counted.');const [d,t]=cohortParts();
+  const matrices=data.confusion.filter(r=>r.dataset===d && r.task===t);if(!matrices.length){note('Score tasks use numeric errors instead of a categorical confusion matrix. See Quality.');return;}
+  for(const matrix of matrices){content.append(el('h3',matrix.model));const counts=matrix.counts, names=[...new Set([...Object.keys(counts),...Object.values(counts).flatMap(Object.keys).filter(k=>k!=='(invalid/API error)')])].sort();
+    const predicted=Object.values(counts).some(r=>'(invalid/API error)' in r)?[...names,'(invalid/API error)']:names;
+    const maximum=Math.max(1,...Object.values(counts).flatMap(Object.values)),wrap=el('div',undefined,'table-wrap'),tableNode=el('table',undefined,'matrix'),head=el('tr');
+    head.append(el('th','Expected ↓ / Predicted →'));for(const name of predicted)head.append(el('th',name));tableNode.append(head);
+    for(const gold of names){const row=el('tr');row.append(el('th',gold));for(const pred of predicted){const value=counts[gold]?.[pred]||0,ratio=value/maximum,td=el('td',String(value));td.style.background=`rgb(${239-Math.round(190*ratio)},${246-Math.round(130*ratio)},${255-Math.round(66*ratio)})`;td.style.color=ratio>=.55?'white':'#172b4d';row.append(td);}tableNode.append(row);}wrap.append(tableNode);content.append(wrap);}}
+function casesView(){heading('Cases and responses');note('Includes original inputs, frozen questions, normalized predictions and full saved responses. Case contents travel with this file.');
+  const controls=el('div',undefined,'filters'),list=el('div'),inspection=el('div');content.append(controls,list,inspection);
+  let model='',mode='failures',search='',page=0,all=false;
+  select('Model',[['','All models'],...Object.keys(data.profiles).map(x=>[x,x])],model,controls,v=>{model=v;page=0;draw();});
+  select('Cases',[['failures','Failures'],['primary','All primary cases'],['checks','Warm-up / connection checks'],['repeat','Repeated sample']],mode,controls,v=>{mode=v;page=0;draw();});
+  const box=el('label','Search case ID or input','control'),input=el('input');input.type='search';input.oninput=()=>{search=input.value.toLowerCase();page=0;draw();};box.append(input);controls.append(box);
+  const label=el('label'),check=el('input');check.type='checkbox';check.onchange=()=>{all=check.checked;page=0;draw();};label.append(check,document.createTextNode(' Include all use cases'));controls.append(label);
+  function inspect(row){inspection.replaceChildren();detail('Original case and frozen question',casesById.get(row.id),inspection,true);detail('Normalized prediction',Object.fromEntries(Object.entries(row).filter(([k])=>k!=='raw')),inspection,true);detail('Full raw response and API error',{response:row.raw,error:row.error_detail},inspection,true);}
+  function draw(){list.replaceChildren();inspection.replaceChildren();const source=all?data.records.filter(r=>!dataset||r.dataset===dataset):records();
+    const filtered=source.filter(r=>(!model||r.model===model) && (mode==='failures'?L.primary(r)&&!r.correct:mode==='primary'?L.primary(r):mode==='repeat'?r.phase==='repeat':['warmup','connection_check'].includes(r.phase)) &&
+      (!search||(r.id+' '+JSON.stringify(casesById.get(r.id))).toLowerCase().includes(search)));
+    const pages=Math.max(1,Math.ceil(filtered.length/50));page=Math.min(page,pages-1);const nav=el('div',undefined,'actions'),prev=el('button','Previous'),next=el('button','Next');prev.disabled=page===0;next.disabled=page===pages-1;
+    prev.onclick=()=>{page--;draw();};next.onclick=()=>{page++;draw();};nav.append(el('span',`${filtered.length.toLocaleString()} matching requests · Page ${page+1} of ${pages}`),prev,next);list.append(nav);
+    const shown=filtered.slice(page*50,(page+1)*50);table(shown,['id','model','dataset','task','phase','expected','value','correct','valid','api_error','latency_s','input_tokens','output_tokens'],list,inspect);
+    if(shown.length)inspect(shown[0]);}draw();}
+function evidence(){heading('Profiles and evidence');note('Configured checkpoint provenance is not independent verification of server identity. The captured price basis and business settings apply throughout this report.');
+  detail('Model profiles',data.profiles,content,true);detail('Applied prices and hosting assumptions',data.quotes);detail('Run evidence and analysis assumptions',data.manifest);}
+function protocol(){heading('Protocol and limitations');content.append(el('div',data.protocol.replaceAll('**',''),'protocol'));
+  detail('Captured protocol',data.manifest.protocol,content,true);content.append(el('h3','All repeat checks'));table(data.stability);content.append(el('h3','All paired robustness checks'));table(data.robustness);}
+function guide(){heading('Metric guide');const wrap=table(data.metric_guide.map(([metric,meaning])=>({metric,meaning})));if(wrap)wrap.classList.add('guide');}
+const views={'Overview':overview,'Quality':quality,'Latency':latency,'Cost and forecast':cost,'Fallback scenario':fallback,'Confusion matrices':confusion,'Cases':casesView,'Profiles and evidence':evidence,'Protocol':protocol,'Metric guide':guide};
+function render(){renderFilters();const tabs=document.getElementById('tabs');tabs.replaceChildren();Object.keys(views).forEach((name,i)=>{const b=el('button',name);b.id='tab-'+i;b.setAttribute('role','tab');b.setAttribute('aria-selected',String(name===activeTab));b.setAttribute('aria-controls','content');
+    b.onclick=()=>{activeTab=name;render();document.getElementById('tab-'+i).focus();};b.onkeydown=e=>{if(['ArrowRight','ArrowLeft','Home','End'].includes(e.key)){e.preventDefault();const keys=Object.keys(views);const j=e.key==='Home'?0:e.key==='End'?keys.length-1:(i+(e.key==='ArrowRight'?1:-1)+keys.length)%keys.length;activeTab=keys[j];render();document.getElementById('tab-'+j).focus();}};tabs.append(b);});
+  content.replaceChildren();content.setAttribute('aria-labelledby','tab-'+Object.keys(views).indexOf(activeTab));if(cohort)views[activeTab]();else note('No result cohorts are available.');}
+function download(name,text,type){const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+document.getElementById('subtitle').textContent=data.run_name+' · Exported '+data.exported_utc.slice(0,10)+' · Reference at export: '+data.baseline;
+if(data.warnings.length){const notices=el('details',undefined,'notice');notices.append(el('summary',data.warnings.length+' report limitations — read before interpreting results'));
+  for(const warning of data.warnings)notices.append(el('p',warning));document.getElementById('notices').append(notices);}
+for(const [value,label] of [[Object.keys(data.profiles).length,'Models'],[data.cases.length,'Dataset cases'],[data.records.length,'Recorded requests'],[new Set(data.cases.map(c=>c.task)).size,'Use cases']]){const card=el('div',undefined,'card');card.append(el('strong',value.toLocaleString()),el('span',label));document.getElementById('summary-cards').append(card);}
+const footer=document.getElementById('downloads'),actions=el('div',undefined,'actions');
+for(const [name,action] of [['Download comparison CSV',()=>download('benchmark_comparison.csv',L.csv(allVisible()),'text/csv;charset=utf-8')],['Download complete data JSON',()=>download('benchmark_report_data.json',JSON.stringify(data,null,2),'application/json')]]){const button=el('button',name);button.onclick=action;actions.append(button);}footer.append(actions,el('p','This is a saved analytical report. Model execution, API-key configuration and new inference require the local application. Prices and business targets are captured at export; the volume and fallback controls are offline scenarios.','muted'));
+render();

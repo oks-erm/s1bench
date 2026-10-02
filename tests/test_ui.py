@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import benchmark as b
+import report_export as reports
+import json
 
 class DashboardTests(unittest.TestCase):
     def test_dashboard_starts_and_accepts_model_and_pricing_edits_without_network(self):
@@ -54,26 +56,28 @@ class DashboardTests(unittest.TestCase):
             app.session_state["report_folder"]=result["folder"]
             with (patch.object(b,"BASE",Path(root)),
                   patch("urllib.request.urlopen",side_effect=AssertionError("No network in saved results")),
-                  patch.object(b,"html_report",wraps=b.html_report) as export):
+                  patch.object(reports,"render_report",wraps=reports.render_report) as export):
                 app.run()
                 self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
-                figures=export.call_args.args[3]
-                self.assertEqual(len(figures),2)
-                colors={trace.name:trace.marker.color for trace in figures[0].data}
-                self.assertEqual(set(colors),{"jev","laya","nimble","gpt","clm"})
-                self.assertEqual(len(set(colors.values())),5)
-                self.assertEqual(len({trace.marker.color for trace in figures[1].data}),2)
-                # Test the actual download path after Streamlit has rendered the charts.
-                standalone=export._mock_wraps(*export.call_args.args,**export.call_args.kwargs)
+                payload=export.call_args.args[0]
+                self.assertEqual(set(payload["profiles"]),{"jev","laya","nimble","gpt","clm"})
+                self.assertEqual(len(payload["records"]),len(b.read_report(result["folder"])["records"]))
+                self.assertEqual(set(payload["summaries_by_reference"]),set(payload["profiles"]))
+                standalone=reports.render_report(payload)
                 self.assertIn("Confusion matrices",standalone)
                 self.assertTrue(any(x.label=="Confusion matrices" for x in app.tabs))
-                matrices=export.call_args.kwargs["confusion"]
-                self.assertEqual({m["model"] for m in matrices},set(colors))
+                self.assertTrue(any(x.label=="Download complete HTML report" for x in app.get("download_button")))
+                matrices=payload["confusion"]
+                self.assertEqual({m["model"] for m in matrices},set(payload["profiles"]))
                 self.assertTrue(all(sum(sum(row.values()) for row in m["counts"].values())==2 for m in matrices))
+                charts=app.get("plotly_chart")
+                figures=[json.loads(x.proto.spec) for x in charts[:2]]
+                self.assertEqual(len(figures),2)
+                self.assertEqual(len({trace["marker"]["color"] for trace in figures[0]["data"]}),5)
+                self.assertEqual(len({trace["marker"]["color"] for trace in figures[1]["data"]}),2)
                 for figure in figures:
-                    self.assertNotRegex(figure.to_json(),r'#[0]{4}[0-9]{2}')
-                    for trace in figure.data:
-                        self.assertIn(trace.marker.color,standalone)
+                    for trace in figure["data"]:
+                        self.assertIn(trace["marker"]["color"],standalone)
                 self.assertFalse(list(app.error),[x.value for x in app.error])
                 self.assertTrue(any(x.value=="Business decision matrix" for x in app.subheader))
                 self.assertTrue(any(x.label=="Cost price basis" for x in app.selectbox))

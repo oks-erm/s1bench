@@ -45,6 +45,15 @@ Combining runs must check the request_serialization policy and ordered inputs;
 missing policy means legacy sorted_keys. Do not count identical saved option orders
 as an option-order robustness test. Keep old evidence unchanged and expose analysis
 warnings. CLM_DIAGNOSTIC.md records the local port investigation and its limits.
+`report_export.py` and `report_assets/` build a single-file offline viewer, embedding
+all datasets, cases and response evidence. Protocol text and the metric guide are
+shared with Streamlit. Reference comparisons use Python's existing summaries;
+browser fallback replay in logic.js must match benchmark.fallback_replay (Node parity
+tests run when Node is available). Never fetch CDNs or call model APIs from exports.
+Escape embedded JSON against script termination and render dataset text with
+textContent. Do not include connection credentials or custom request headers.
+Export all cohorts regardless of current dashboard filters. Prices/business targets
+are captured settings; only volume/fallback scenarios recalculate in the browser.
 
 ## Commands and validation
 
@@ -52,7 +61,8 @@ warnings. CLM_DIAGNOSTIC.md records the local port investigation and its limits.
 - Standard setup/dashboard: `python3 start.py` (creates `.venv`, installs requirements).
 - This Mac: `.venv/bin/python local_models.py laya` (or `nimble`, `clm`).
 - Tests: `.venv/bin/python -m unittest discover -s tests -v`.
-- Syntax: `.venv/bin/python -m py_compile benchmark.py bench_ui.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py`.
+- Syntax: `.venv/bin/python -m py_compile benchmark.py bench_ui.py report_export.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py`.
+- Browser script syntax: `node --check report_assets/logic.js` and `node --check report_assets/report.js`.
 - Launcher syntax: `zsh -n 'Start Local.command'`.
 - No separate build, linter, or typechecker is configured.
 - `.streamlit/config.toml` uses viewer toolbar mode to hide Streamlit's publishing

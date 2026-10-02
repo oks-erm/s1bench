@@ -1012,8 +1012,10 @@ def csv_bytes(rows):
 def seal(folder):
     folder = Path(folder)
     artifacts = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in folder.iterdir()
-                 if p.is_file() and p.suffix in {".json", ".jsonl", ".csv"} and p.name != "evidence.json"}
+                 if p.is_file() and p.suffix in {".json", ".jsonl", ".csv", ".html"} and p.name != "evidence.json"}
     sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in BASE.glob("*.py")}
+    sources.update({p.relative_to(BASE).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in (BASE/"report_assets").glob("*") if p.is_file()})
     write_json(folder/"evidence.json", {"method_version": METHOD_VERSION, "created_utc": utc(),
                "environment": {"python": platform.python_version(), "os": platform.system(),
                                "architecture": platform.machine(), "logical_cpus": os.cpu_count(),
@@ -1374,7 +1376,10 @@ def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batche
         "analysis_costs":cost_totals(priced,quotes),
     })
     manifest = parse((folder/"manifest.json").read_text("utf-8"))
-    (folder/"report.html").write_text(html_report(summaries,profiles,manifest,confusion=confusion),encoding="utf-8")
+    from report_export import complete_html_report
+    (folder/"report.html").write_text(complete_html_report(
+        {"folder":folder,"records":records,"cases":cases,"config":cfg,"manifest":manifest,"availability":availability},
+        analysis=(summaries,priced,profiles,quotes,stability,robustness)),encoding="utf-8")
     seal(folder)
 
 def combine_reports(selections, output_root=None):

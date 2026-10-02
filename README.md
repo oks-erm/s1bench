@@ -60,13 +60,26 @@ Each run is saved under `results/` with `report.html`, `summary.csv`, raw respon
 frozen settings and evidence hashes. Reopen it from **Results → Recent run** after
 restarting. Config, keys, downloaded weights, uploaded data and results stay local
 and are excluded from Git. Back up results separately if you need to keep them.
-**Download interactive HTML report** includes the displayed quality and latency
-charts with their colours embedded, so they work outside the dashboard and offline.
-Choice and yes/no tasks also include confusion matrices for each model and use case,
-in both **Results → Confusion matrices** and the HTML report. Rows are expected
-labels, columns are predictions; invalid answers/API errors are included separately.
-Only primary attempts count, so repeated checks do not inflate the matrix.
-Download again from a saved run to update an older HTML export; no model calls are needed.
+**Download complete HTML report** creates one self-contained, offline report for
+the entire run, regardless of the dataset or use case currently selected. Send that
+file (or zip it for email); recipients open it in a browser with JavaScript enabled.
+They do not need Python, Streamlit, model weights, API keys or internet access.
+
+The viewer includes the business matrix, coloured quality/latency charts, cost and
+forecast tables, fallback replay, confusion matrices, model profiles, run evidence,
+protocol, metric guide, and all original cases and saved responses. It supports
+dataset/use-case/reference selection, sortable tables, case search and pagination,
+monthly volume scenarios and fallback-label checkboxes. CSV and complete data JSON
+downloads are available inside the report. Choice and yes/no confusion matrices use
+primary attempts only, with invalid/API errors separate; missing requests are not counted.
+
+Prices, hosting rates and business targets are captured when exporting. Reference
+comparisons use the same Python calculations as the dashboard, precomputed for each
+model. Forecast volume and fallback replay run entirely in the browser. Setup, keys,
+new inference and arbitrary repricing remain in the local app. The file includes
+case inputs and responses, so choose a dataset appropriate for the intended recipients.
+Regenerate an older export from its saved run; no model calls are needed. New runs
+also save the complete viewer automatically as `report.html`.
 
 Cost analysis uses complete current rates for the same model and endpoint, falling
 back to the run's saved rates when current fields are blank. Explicit zero rates
@@ -127,7 +140,7 @@ answers, local checks, prompt sensitivity, and limits of the community MLX port.
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile benchmark.py bench_ui.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
+python3 -m py_compile benchmark.py bench_ui.py report_export.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
 ```
 
 Use `.venv/bin/python` on macOS/Linux or `.venv\Scripts\python.exe` on Windows after

@@ -12,13 +12,10 @@ import streamlit as st
 
 import benchmark as bench
 import local_runtime
+from report_export import complete_html_report, METRIC_GUIDE, PROTOCOL_TEXT, MODEL_COLORS
 from data_prompt import EXAMPLE, preparation_prompt
 
 BASE = Path(__file__).resolve().parent
-# Real colours survive standalone HTML export; Streamlit's default template uses
-# near-black placeholders that only its frontend knows how to replace.
-MODEL_COLORS = {"jev":"#0072B2", "laya":"#E69F00", "nimble":"#009E73",
-                "gpt":"#8064C9", "clm":"#D55E00"}
 st.set_page_config(page_title="System 1 benchmark",page_icon="📊",layout="wide")
 
 class RunJob:
@@ -120,49 +117,7 @@ def run_progress():
 def protocol_block(report,errors,warnings,stability,robustness):
     with st.expander("Protocol",expanded=False):
         st.write("This measures typed decision components inside an agent, not complete agent success.")
-        st.markdown("""
-**Fair comparison.** Models receive the same state, question and rubric.
-Native decision models receive typed requests; chat models return the same
-decision in JSON. Adapters render content differently, so results describe
-the configured deployment. Inspect captured IDs, parameters and effort.
-
-**Quality.** Each primary case counts once. Partial-run success divides by all planned cases; unattempted cases are not successes. Sampling intervals are withheld for partial cohorts. API failures and invalid answers
-count as failures for task success. Choice uses exact labels, noul uses the
-saved decision threshold, and scores use the saved tolerance. F1 balances
-represented gold classes. Brier and MAE use valid numeric outputs; read
-validity coverage alongside them.
-
-**Evidence.** Compare matched cases in the same dataset/use case. Family
-bootstrap intervals keep related variants together. Wilson intervals assume
-one independent case per family. Grouped boundary outcomes cannot estimate
-unseen errors. Intervals are unadjusted 95% intervals conditional on this
-sample; selecting among many models needs confirmation on a fresh holdout.
-
-**Batches and stability.** Ten batches organize one dataset; they are not ten
-independent datasets. Primary outcomes are pooled. F1 and p95 are not averaged
-across batches. Exact repetitions measure consistency without increasing the
-independent accuracy sample size. A stable wrong answer is still wrong.
-Paraphrase, distractor, option-order and changed-fact checks are measured only
-where explicit labelled pair metadata exists.
-
-**Latency.** Median/p95 show completed HTTP calls without API errors, including
-invalid generated answers. Attempt p95 includes failures/timeouts. Warmups are
-excluded from primary quality. Client time includes network and parsing.
-This sequential test does not establish production concurrency or throughput.
-CLM embedding caches affect timings; record server cache/context settings.
-
-**Cost.** Saved token usage is repriced under the selected rates. Missing paid
-usage remains unknown. Local API fees are zero; hosting is separate. Run spend
-includes warmups, connection checks and repetitions. Per-1k prices with partial
-coverage describe known calls only. Forecasts require full cost coverage.
-Hidden reasoning tokens already included in total output usage are not added
-again. Estimates and 30-day hosting scenarios are not billing invoices.
-
-**Decision.** Inspect unsafe errors, critical failures, uncertainty, latency,
-consistency and cost together. The pilot recommendation requires reviewed
-real holdout labels and declared business targets. It does not certify safety.
-Synthetic cases and AI draft labels are screening evidence.
-""")
+        st.markdown(PROTOCOL_TEXT)
         manifest = report["manifest"]
         st.write({"method":manifest.get("method_version","older run"),
                   "primary_cases":len(report["cases"]),
@@ -288,7 +243,6 @@ def result_view(report,cfg):
     df = pd.DataFrame(scoped)
     complete = df[df["status"]=="complete"].copy()
     tabs = st.tabs(["Quality","Latency","Cost and forecast","Fallback scenario","Profiles and evidence","Confusion matrices"])
-    figures = []
     with tabs[0]:
         st.dataframe(df[["model","planned","attempted","families","success_rate","success_ci_low","success_ci_high",
                          "ci_method","macro_f1","brier","mae","valid_rate","api_errors","invalid_answers",
@@ -303,7 +257,6 @@ def result_view(report,cfg):
             fig.update_yaxes(range=[0,1],tickformat=".0%")
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig,width="stretch",theme=None)
-            figures.append(fig)
         st.caption("Critical failures are test failures, not measured production harm. Unsafe errors follow the declared risk direction and safe labels.")
         pairs = [r for r in robustness if r["task"]==cohort[1]]
         if pairs:
@@ -316,7 +269,6 @@ def result_view(report,cfg):
                          labels={"model":"Model","value":"Latency (ms)","variable":"Percentile"},
                          title="Client latency, milliseconds")
             st.plotly_chart(fig,width="stretch",theme=None)
-            figures.append(fig)
         st.caption("p95 needs enough observations. These are sequential client timings, not concurrent load or throughput tests.")
     with tabs[2]:
         st.subheader("Estimated API cost for this run")
@@ -374,12 +326,11 @@ def result_view(report,cfg):
                             title=table["model"]+" · "+cohort[0]+" / "+cohort[1],template="plotly_white")
             st.plotly_chart(fig,width="stretch",theme=None)
     st.download_button("Download business CSV",bench.csv_bytes(visible),"business_report.csv",mime="text/csv")
-    export_manifest = {**report["manifest"],"analysis_business_targets":analysis_cfg["business"],"price_basis":basis,
-                       "analysis_warnings":input_warnings,
-                       "analysis_costs":bench.cost_totals(records,quotes),
-                       "analysis_quotes":bench.scrub_config({"models":list(quotes.values())})["models"]}
-    st.download_button("Download interactive HTML report",
-                       bench.html_report(visible,profiles,export_manifest,figures,confusion=confusion),"benchmark_report.html",mime="text/html")
+    st.caption("The complete HTML includes every dataset, use case, result tab and saved case, regardless of the filters above. Recipients can explore it offline; it contains case inputs and responses, but no API-key settings.")
+    st.download_button("Download complete HTML report",
+                       complete_html_report(report,analysis_cfg=analysis_cfg,current_prices=override,
+                           analysis=(summaries,records,profiles,quotes,stability,robustness),price_basis=basis),
+                       "benchmark_complete_report.html",mime="text/html")
     st.session_state["analysis_records"] = records
 
 def case_view(report):
@@ -761,25 +712,7 @@ with cases_tab:
 
 with guide_tab:
     st.subheader("Metrics and how to use them")
-    guide = [
-        ("Task success","Correct / all planned cases; errors and invalid answers count as failures. Use for the production outcome, only compare complete cohorts."),
-        ("95% interval","Sampling uncertainty at independent-family level. Related conversations are grouped. A narrow interval needs diverse reviewed data; repetitions do not enlarge the independent sample."),
-        ("Paired gap vs reference","Difference on exactly the same cases with a paired family interval. A replacement is plausible only when the lower bound clears your allowed quality drop."),
-        ("Macro F1","Equal weight to classes present in the gold set. Reveals minority-class weakness hidden by accuracy; inspect missing labels in your dataset."),
-        ("NONE recall / precision","Recall: catches out-of-scope requests. Precision: avoids unnecessarily refusing useful work. Non-NONE on NONE shows harmful forced routing."),
-        ("Risk exposure and harmful errors","Denominator depends on the failure: out-of-scope messages, positive PII cases, unauthorized actions, or high-escalation gold. Set the direction per task. Grouped or small samples may not establish your risk bound."),
-        ("Critical failures","Wrong, missing or invalid answers on cases tagged critical. Review the cases before automation; one severity label cannot encode every business impact."),
-        ("Brier score","Mean squared error of binary probabilities on valid answers, lower is better. Valid for probabilistic yes/no forecasts; not a proof that different providers' confidence fields are comparable."),
-        ("MAE / score tolerance","Mean absolute score error plus success inside your configured rubric tolerance. Scores are zero-based rubric indices; MAE alone can hide dangerous under-escalation."),
-        ("Valid answers / API errors","Separates malformed decisions from HTTP/network failures. Reliability includes both; completed-answer quality alone can flatter an unreliable endpoint."),
-        ("p50 and p95 latency","Client wall time on completed requests after warm-up. Shows typical and tail delay, including transport/response parsing. Attempt p95 also includes failed requests. Serial testing is not concurrent production capacity."),
-        ("Repeat agreement","Same input and settings, repeated in separate rounds; equality for categories/binary decisions and configured score tolerance. Consistency can be consistently wrong, so inspect all-repeats-correct and critical flips."),
-        ("Robustness pair success","All linked equivalent/changed-fact cases correct. Tests distractors, option order, paraphrase and sensitivity to changed facts; report alongside repeat consistency."),
-        ("API cost / 1k and per correct","Observed token charges at recorded or current pinned rates. Unknown usage/prices stay unknown; local API charges are 0. Cost per correct includes failed attempts when all charges are known."),
-        ("Hosting and monthly scenarios","Explicit hourly hosting and volume assumptions. Active serial wall time and 720-hour reservation are separate scenarios; throughput/utilization must be measured before a fleet budget."),
-        ("Fallback replay","Offline replay: invalid/error or selected fallback labels trigger the reference model. Adds both costs and serial latencies. Valid only on complete shared cases; real agent behavior can differ."),
-        ("Ten batches","Whole-family balanced partitions to spot instability over time and mix. They reuse one dataset, so their average does not provide ten independent experiments."),
-    ]
+    guide = METRIC_GUIDE
     st.dataframe(pd.DataFrame(guide,columns=["Metric","Why it is useful / limitation"]),width="stretch",hide_index=True)
     st.caption("Domain data is essential: taxonomy, policy, conversation history and failure costs change model rankings. The fixture suite checks plumbing; use a reviewed, untouched holdout for a deployment recommendation.")
 
