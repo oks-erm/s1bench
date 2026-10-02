@@ -64,7 +64,12 @@ class DashboardTests(unittest.TestCase):
                 self.assertEqual(len(set(colors.values())),5)
                 self.assertEqual(len({trace.marker.color for trace in figures[1].data}),2)
                 # Test the actual download path after Streamlit has rendered the charts.
-                standalone=export._mock_wraps(*export.call_args.args)
+                standalone=export._mock_wraps(*export.call_args.args,**export.call_args.kwargs)
+                self.assertIn("Confusion matrices",standalone)
+                self.assertTrue(any(x.label=="Confusion matrices" for x in app.tabs))
+                matrices=export.call_args.kwargs["confusion"]
+                self.assertEqual({m["model"] for m in matrices},set(colors))
+                self.assertTrue(all(sum(sum(row.values()) for row in m["counts"].values())==2 for m in matrices))
                 for figure in figures:
                     self.assertNotRegex(figure.to_json(),r'#[0]{4}[0-9]{2}')
                     for trace in figure.data:

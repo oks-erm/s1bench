@@ -1243,6 +1243,23 @@ def _run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outp
     notify("Saved "+str(folder))
     return {"folder":str(folder),"error":error,"interrupted":interrupted}
 
+def confusion_tables(records):
+    """Categorical confusion counts, keeping model and cohort boundaries intact."""
+    groups = {}
+    for row in records:
+        if not primary_row(row) or row["type"] not in {"choice", "noul"}:
+            continue
+        key = (row["model"], row["dataset"], row["task"])
+        counts = groups.setdefault(key, {})
+        gold = str(row["expected"])
+        predicted = str(row["decision"]) if row["valid"] and not row.get("api_error") else "(invalid/API error)"
+        counts.setdefault(gold, {})[predicted] = counts.setdefault(gold, {}).get(predicted, 0) + 1
+    model_order = {model:index for index,model in enumerate(dict.fromkeys(key[0] for key in groups))}
+    ordered = sorted(groups,key=lambda key:(model_order[key[0]],key[1],key[2]))
+    return [{"model":model, "dataset":dataset, "task":task, "counts":groups[(model,dataset,task)]}
+            for model,dataset,task in ordered]
+
+
 def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batches,
                 protocol, plan, models, started, interrupted=False, error=None,
                 issued=None, connection_test=False, execution_order="interleaved", sources=None):
@@ -1265,14 +1282,9 @@ def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batche
         rows, *_ = summarize(subset_rows,subset,cfg,availability,bootstrap=100)
         batch_results += [{"batch":batch,**r} for r in rows]
     (folder/"batches.csv").write_bytes(csv_bytes(batch_results))
-    confusion = {}
-    for row in records:
-        if primary_row(row) and row["type"] in {"choice","noul"}:
-            key = row["model"]+" / "+row["dataset"]+" / "+row["task"]
-            table = confusion.setdefault(key,{})
-            gold, pred = str(row["expected"]), str(row["decision"]) if row["valid"] else "(invalid/API error)"
-            table.setdefault(gold,{})[pred] = table.setdefault(gold,{}).get(pred,0)+1
-    write_json(folder/"confusion.json",confusion)
+    confusion = confusion_tables(records)
+    write_json(folder/"confusion.json",{
+        " / ".join((table["model"],table["dataset"],table["task"])):table["counts"] for table in confusion})
     by_currency = defaultdict(float)
     for row in priced:
         if row["_api_cost"] is not None:
@@ -1293,7 +1305,7 @@ def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batche
         "full_api_estimate":known if not unknown else None,
     })
     manifest = parse((folder/"manifest.json").read_text("utf-8"))
-    (folder/"report.html").write_text(html_report(summaries,profiles,manifest),encoding="utf-8")
+    (folder/"report.html").write_text(html_report(summaries,profiles,manifest,confusion=confusion),encoding="utf-8")
     seal(folder)
 
 def combine_reports(selections, output_root=None):
@@ -1379,7 +1391,7 @@ def initialize():
         data_path.write_bytes(jsonl_bytes(generate()))
     return cfg_path,data_path
 
-def html_report(summaries, profiles, manifest, figures=None):
+def html_report(summaries, profiles, manifest, figures=None, confusion=None):
     fields = ["dataset","task","model","requested_model","effort","status","success_rate","delta_vs_baseline",
               "delta_ci_low","delta_ci_high","p50_ms","p95_ms","api_per_1k","currency","cost_coverage",
               "critical_failures","unsafe_decisions","risk_exposures","families","recommendation"]
@@ -1394,6 +1406,30 @@ def html_report(summaries, profiles, manifest, figures=None):
     charts = ""
     for index,figure in enumerate(figures or []):
         charts += figure.to_html(full_html=False,include_plotlyjs=True if index==0 else False)
+    matrices = ""
+    if confusion:
+        matrices = ("<h2>Confusion matrices</h2><p>Rows: expected label. Columns: predicted label. "
+                    "Counts include attempted primary cases only, excluding warm-ups and repeats. "
+                    "Invalid answers and API errors have a separate column. Missing requests are not counted; "
+                    "check coverage above. Score tasks do not have categorical confusion matrices.</p>")
+        for entry in confusion:
+            counts = entry["counts"]
+            labels = sorted(set(counts) | {p for row in counts.values() for p in row if p != "(invalid/API error)"})
+            predicted = labels + (["(invalid/API error)"] if any("(invalid/API error)" in row for row in counts.values()) else [])
+            maximum = max(1, max(n for row in counts.values() for n in row.values()))
+            title = entry["model"]+" · "+entry["dataset"]+" / "+entry["task"]
+            matrices += "<details class='confusion-matrix'><summary>"+cell(title)+"</summary><div class='matrix-scroll'><table>"
+            matrices += "<tr><th scope='col'>Expected ↓ / Predicted →</th>"+"".join("<th scope='col'>"+cell(p)+"</th>" for p in predicted)+"</tr>"
+            for gold in labels:
+                matrices += "<tr><th scope='row'>"+cell(gold)+"</th>"
+                for pred in predicted:
+                    value = counts.get(gold,{}).get(pred,0)
+                    ratio = value/maximum
+                    background = f"rgb({239-round(190*ratio)},{246-round(130*ratio)},{255-round(66*ratio)})"
+                    foreground = "#ffffff" if ratio >= .55 else "#172b4d"
+                    matrices += f"<td style='background:{background};color:{foreground}'>{value}</td>"
+                matrices += "</tr>"
+            matrices += "</table></div></details>"
     note = (
         "Typed component benchmark, not full-agent success. Quality uses primary cases once; repeated calls "
         "measure consistency. Partial cohorts do not support complete comparisons. Intervals are unadjusted "
@@ -1404,8 +1440,10 @@ def html_report(summaries, profiles, manifest, figures=None):
     )
     return ("<!doctype html><html><meta charset='utf-8'><title>S1 benchmark report</title>"
             "<style>body{font:14px system-ui;margin:32px}table{border-collapse:collapse;width:100%}"
-            "td,th{padding:8px;border:1px solid #ddd;text-align:left}th{background:#f2f5f9}pre{white-space:pre-wrap}</style>"
-            "<h1>System 1 benchmark</h1><p>"+html.escape(note)+"</p>"+table+charts+
+            "td,th{padding:8px;border:1px solid #ddd;text-align:left}th{background:#f2f5f9}pre{white-space:pre-wrap}"
+            ".confusion-matrix{margin:12px 0}.confusion-matrix summary{cursor:pointer;font-weight:600;padding:12px;background:#edf4fb}"
+            ".matrix-scroll{overflow-x:auto}.confusion-matrix td{text-align:center}</style>"
+            "<h1>System 1 benchmark</h1><p>"+html.escape(note)+"</p>"+table+charts+matrices+
             "<h2>Captured model profiles</h2><pre>"+html.escape(json.dumps(profiles,indent=2))+
             "</pre><h2>Run evidence</h2><pre>"+html.escape(json.dumps(manifest,indent=2))+"</pre></html>")
 

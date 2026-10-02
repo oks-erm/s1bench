@@ -279,9 +279,12 @@ def result_view(report,cfg):
         return
     cohort = st.selectbox("Inspect one use case",cohorts,format_func=lambda c:c[0]+" / "+c[1])
     scoped = [r for r in visible if (r["dataset"],r["task"])==cohort]
+    visible_keys = {(r["model"],r["dataset"],r["task"]) for r in visible}
+    confusion = [table for table in bench.confusion_tables(records)
+                 if (table["model"],table["dataset"],table["task"]) in visible_keys]
     df = pd.DataFrame(scoped)
     complete = df[df["status"]=="complete"].copy()
-    tabs = st.tabs(["Quality","Latency","Cost and forecast","Fallback scenario","Profiles and evidence"])
+    tabs = st.tabs(["Quality","Latency","Cost and forecast","Fallback scenario","Profiles and evidence","Confusion matrices"])
     figures = []
     with tabs[0]:
         st.dataframe(df[["model","planned","attempted","families","success_rate","success_ci_low","success_ci_high",
@@ -345,10 +348,24 @@ def result_view(report,cfg):
                             "hosting_cost_per_hour":quote.get("hosting_cost_per_hour")})
         st.json(report["manifest"])
         st.caption("Checkpoint/encoder fields are configured provenance, not independently verified server identity.")
+    with tabs[5]:
+        st.caption("Rows are expected labels; columns are predictions. Counts include attempted primary cases only. Warm-ups and repeats are excluded. Missing requests are not counted; check coverage in Quality.")
+        matrices = [table for table in confusion if (table["dataset"],table["task"])==cohort]
+        if not matrices:
+            st.info("Confusion matrices apply to choice and yes/no tasks with recorded primary responses. For score tasks, see Quality for numeric errors.")
+        for table in matrices:
+            frame = pd.DataFrame.from_dict(table["counts"],orient="index").fillna(0).astype(int)
+            labels = sorted(set(frame.index) | (set(frame.columns)-{"(invalid/API error)"}))
+            predicted = labels + (["(invalid/API error)"] if "(invalid/API error)" in frame.columns else [])
+            frame = frame.reindex(index=labels,columns=predicted,fill_value=0)
+            fig = px.imshow(frame,text_auto=True,aspect="auto",color_continuous_scale="Blues",zmin=0,
+                            labels={"x":"Predicted label","y":"Expected label","color":"Cases"},
+                            title=table["model"]+" · "+cohort[0]+" / "+cohort[1],template="plotly_white")
+            st.plotly_chart(fig,width="stretch",theme=None)
     st.download_button("Download business CSV",bench.csv_bytes(visible),"business_report.csv",mime="text/csv")
     export_manifest = {**report["manifest"],"analysis_business_targets":analysis_cfg["business"],"price_basis":basis}
     st.download_button("Download interactive HTML report",
-                       bench.html_report(visible,profiles,export_manifest,figures),"benchmark_report.html",mime="text/html")
+                       bench.html_report(visible,profiles,export_manifest,figures,confusion=confusion),"benchmark_report.html",mime="text/html")
     st.session_state["analysis_records"] = records
 
 def case_view(report):

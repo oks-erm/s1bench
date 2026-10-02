@@ -62,6 +62,10 @@ restarting. Config, keys, downloaded weights, uploaded data and results stay loc
 and are excluded from Git. Back up results separately if you need to keep them.
 **Download interactive HTML report** includes the displayed quality and latency
 charts with their colours embedded, so they work outside the dashboard and offline.
+Choice and yes/no tasks also include confusion matrices for each model and use case,
+in both **Results → Confusion matrices** and the HTML report. Rows are expected
+labels, columns are predictions; invalid answers/API errors are included separately.
+Only primary attempts count, so repeated checks do not inflate the matrix.
 Download again from a saved run to update an older HTML export; no model calls are needed.
 
 ## With your data
