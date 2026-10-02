@@ -54,5 +54,4 @@ class DashboardTests(unittest.TestCase):
                 self.assertFalse(list(app.error),[x.value for x in app.error])
                 self.assertTrue(any(x.value=="Business decision matrix" for x in app.subheader))
                 self.assertTrue(any(x.label=="Cost price basis" for x in app.selectbox))
-                self.assertTrue(any(x.value=="Trustworthy protocol" for x in app.subheader) or
-                                any("protocol" in x.label.lower() for x in app.expander))
+                self.assertTrue(any(x.label=="Protocol" for x in app.expander))

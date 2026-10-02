@@ -115,7 +115,7 @@ def run_progress():
         st.success("Saved: "+job.folder)
 
 def protocol_block(report,errors,warnings,stability,robustness):
-    with st.expander("Protocol and evidence — how to trust these results",expanded=False):
+    with st.expander("Protocol",expanded=False):
         st.write("This measures typed decision components inside an agent, not complete agent success.")
         st.markdown("""
 **Fair comparison.** Models receive the same state, question and rubric.
@@ -489,7 +489,7 @@ busy = bool(job and not job.finished)
 st.session_state["input_errors"] = []
 
 st.title("System 1 benchmark")
-st.caption("Compare typed decisions by use case: quality, latency, cost, risk and consistency. No model calls occur until you click a run button.")
+st.caption("Compare decisions by use case: quality, latency, cost, risk and consistency. Start model servers separately; this dashboard connects to their endpoints. No run starts automatically.")
 if st.session_state.get("config_load_error"):
     st.warning("Saved config could not be loaded: "+st.session_state["config_load_error"])
 if busy:
