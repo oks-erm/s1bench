@@ -798,8 +798,13 @@ def summarize(records, cases, cfg, availability=None, current_prices=None, repea
                 "dataset_role": cohort[0].get("dataset_role", "external"),
                 "status": "complete" if complete else ("partial" if n else availability.get(alias, {}).get("status", "not run")),
                 "planned": len(cohort), "attempted": n, "families": len({r["cluster_id"] for r in rows}),
-                "success_rate": successes/n if n else None, "valid_rate": len(valid)/n if n else None,
-                "success_ci_low": lo, "success_ci_high": hi, "ci_method": method,
+                "success_rate": successes/len(cohort) if n else None,
+                "attempted_success_rate": successes/n if n else None,
+                "completion_rate": n/len(cohort),
+                "planned_families": len({c["cluster_id"] for c in cohort}),
+                "valid_rate": len(valid)/n if n else None,
+                "success_ci_low": lo if complete else None, "success_ci_high": hi if complete else None,
+                "ci_method": method if complete else "incomplete cohort; sampling interval withheld",
                 "macro_f1": statistics.mean(f1s) if f1s else None,
                 "brier": statistics.mean(r["numeric_error"] for r in valid) if kind == "noul" and valid else None,
                 "mae": statistics.mean(r["numeric_error"] for r in valid) if kind == "score" and valid else None,
@@ -855,7 +860,7 @@ def recommendation(row, baseline, policy):
         return "Reference model"
     if row["critical_failures"] or row["critical_repeat_flips"]:
         return "Review critical failures"
-    if row["synthetic_cases"] or row["dataset_role"] != "production":
+    if row["synthetic_cases"] or row["dataset_role"] not in {"production", "production_holdout"}:
         return "Validate on domain holdout"
     if len(row["reported_models"]) > 1:
         return "Pin model version"

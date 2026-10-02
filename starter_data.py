@@ -1,6 +1,7 @@
 """1400 synthetic screening cases; template families are explicitly grouped."""
 import copy
 import random
+import json
 
 def choice(instructions, criteria):
     return {"type":"choice","instructions":instructions,"criteria":criteria}
@@ -229,4 +230,23 @@ def generate():
         parent["pair_id"]=variant["pair_id"]=pair_id
         parent["pair_relation"]=variant["pair_relation"]=relation
         stress.append(variant)
-    return standard+stress
+    cases = standard+stress
+    # Merge entire template families if exact inputs overlap across patterns.
+    # This preserves family dependence instead of manufacturing independence.
+    parents = {c["cluster_id"]:c["cluster_id"] for c in cases}
+    def root(name):
+        while parents[name] != name:
+            parents[name] = parents[parents[name]]
+            name = parents[name]
+        return name
+    observed = {}
+    for c in cases:
+        content = json.dumps([c["task"],c["input"],c["question"]],sort_keys=True)
+        family = c["cluster_id"]
+        if content in observed:
+            parents[root(family)] = root(observed[content])
+        else:
+            observed[content] = family
+    for c in cases:
+        c["cluster_id"] = root(c["cluster_id"])
+    return cases

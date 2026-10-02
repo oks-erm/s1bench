@@ -180,13 +180,13 @@ Synthetic cases and AI draft labels are screening evidence.
         if stability:
             st.markdown("**Exact-repeat consistency**")
             display = pd.DataFrame(stability)
-            st.dataframe(display,use_container_width=True)
+            st.dataframe(display,width="stretch")
             st.caption("Agreement is among complete repetition groups; invalid groups count as disagreement. Incomplete groups remain visible.")
         else:
             st.caption("Exact-repeat consistency not measured, or no repeat sample was completed.")
         if robustness:
             st.markdown("**Explicit paired robustness checks**")
-            st.dataframe(pd.DataFrame(robustness),use_container_width=True)
+            st.dataframe(pd.DataFrame(robustness),width="stretch")
             st.caption("Changed-fact accuracy requires all paired answers correct. Agreement is descriptive; meaningful changes should change the answer.")
         else:
             st.caption("No explicit labelled robustness pairs were supplied.")
@@ -240,7 +240,7 @@ def result_view(report,cfg):
             "Next step":r["recommendation"],
         })
     st.subheader("Business decision matrix")
-    st.dataframe(pd.DataFrame(matrix),use_container_width=True,hide_index=True)
+    st.dataframe(pd.DataFrame(matrix),width="stretch",hide_index=True)
     cohorts = sorted({(r["dataset"],r["task"]) for r in visible})
     if not cohorts:
         return
@@ -254,32 +254,32 @@ def result_view(report,cfg):
         st.dataframe(df[["model","planned","attempted","families","success_rate","success_ci_low","success_ci_high",
                          "ci_method","macro_f1","brier","mae","valid_rate","api_errors","invalid_answers",
                          "none_precision","none_recall","non_none_on_none_rate","unsafe_decisions",
-                         "risk_exposures","unsafe_upper95","risk_direction","auto_coverage","auto_accuracy"]],use_container_width=True)
+                         "risk_exposures","unsafe_upper95","risk_direction","auto_coverage","auto_accuracy"]],width="stretch")
         if not complete.empty:
             fig = px.bar(complete,x="model",y="success_rate",hover_data=["requested_model","effort","attempted","families"],
                          title="Task success on complete matched cohorts")
             fig.update_yaxes(range=[0,1],tickformat=".0%")
-            st.plotly_chart(fig,use_container_width=True)
+            st.plotly_chart(fig,width="stretch")
             figures.append(fig)
         st.caption("Critical failures are test failures, not measured production harm. Unsafe errors follow the declared risk direction and safe labels.")
         pairs = [r for r in robustness if r["task"]==cohort[1]]
         if pairs:
-            st.dataframe(pd.DataFrame(pairs),use_container_width=True)
+            st.dataframe(pd.DataFrame(pairs),width="stretch")
     with tabs[1]:
-        st.dataframe(df[["model","p50_ms","p95_ms","attempt_p95_ms","timed_completed","api_errors"]],use_container_width=True)
+        st.dataframe(df[["model","p50_ms","p95_ms","attempt_p95_ms","timed_completed","api_errors"]],width="stretch")
         if not complete.empty:
             fig = px.bar(complete,x="model",y=["p50_ms","p95_ms"],barmode="group",title="Client latency, milliseconds")
-            st.plotly_chart(fig,use_container_width=True)
+            st.plotly_chart(fig,width="stretch")
             figures.append(fig)
         st.caption("p95 needs enough observations. These are sequential client timings, not concurrent load or throughput tests.")
     with tabs[2]:
         fields = ["model","api_per_1k","cost_per_correct","cost_coverage","active_hosting_per_1k","active_total_per_1k",
                   "monthly_api","always_on_30day_hosting","currency","rate_basis"]
-        st.dataframe(df[fields],use_container_width=True)
+        st.dataframe(df[fields],width="stretch")
         savings = [r for r in scoped if r.get("monthly_api_savings_vs_baseline") is not None]
         if savings:
             st.dataframe(pd.DataFrame([{"model":r["model"],"monthly_API_savings":r["monthly_api_savings_vs_baseline"],
-                                       "currency":r["currency"]} for r in savings]),use_container_width=True)
+                                       "currency":r["currency"]} for r in savings]),width="stretch")
         known = sum(r["_api_cost"] for r in records if r["_api_cost"] is not None)
         unknown = sum(r["_api_cost"] is None for r in records)
         currencies = {quotes[r["model"]].get("pricing_currency","USD") for r in records}
@@ -295,7 +295,7 @@ def result_view(report,cfg):
         labels = st.multiselect("Also fall back on these explicit choice labels",choices,
                                default=[x for x in choices if x in {"NONE","CLARIFY","ESCALATE"}])
         replay = bench.fallback_replay(records,summaries,*cohort,baseline,set(labels))
-        st.dataframe(pd.DataFrame(replay),use_container_width=True)
+        st.dataframe(pd.DataFrame(replay),width="stretch")
         st.caption("Offline replay: invalid/API-failed decisions always fall back. Only complete, matched, same-currency cohorts qualify. Latencies add serially. No inference calls are made.")
     with tabs[4]:
         st.json(profiles)
@@ -333,7 +333,7 @@ def case_view(report):
         return
     st.dataframe(pd.DataFrame([{k:r.get(k) for k in ("model","id","task","phase","expected","value","correct","valid",
                                                    "api_error","error_detail","latency_s","input_tokens","output_tokens")}
-                              for r in selected]),use_container_width=True)
+                              for r in selected]),width="stretch")
     index = st.selectbox("Inspect a request",range(len(selected)),
                          format_func=lambda i:f"{selected[i]['model']} / {selected[i]['id']} / {selected[i].get('phase','primary')}")
     row = selected[index]
@@ -584,7 +584,7 @@ with data_tab:
             st.dataframe(pd.DataFrame([{"id":c["id"],"dataset":c.get("dataset"),"task":c["task"],
                                          "type":c["question"]["type"],"gold":str(c["expected"]),
                                          "family":c["cluster_id"],"review":c.get("review_status","unspecified"),
-                                         "role":c.get("dataset_role")} for c in cases]),use_container_width=True)
+                                         "role":c.get("dataset_role")} for c in cases]),width="stretch")
             inspect = st.selectbox("View a data case",range(len(cases)),format_func=lambda i:cases[i]["id"],key="data_case")
             st.json(cases[inspect])
             st.download_button("Download current cases",bench.jsonl_bytes(cases),"benchmark_data.jsonl",
@@ -681,7 +681,7 @@ with guide_tab:
         ("Fallback replay","Offline replay: invalid/error or selected fallback labels trigger the reference model. Adds both costs and serial latencies. Valid only on complete shared cases; real agent behavior can differ."),
         ("Ten batches","Whole-family balanced partitions to spot instability over time and mix. They reuse one dataset, so their average does not provide ten independent experiments."),
     ]
-    st.dataframe(pd.DataFrame(guide,columns=["Metric","Why it is useful / limitation"]),use_container_width=True,hide_index=True)
+    st.dataframe(pd.DataFrame(guide,columns=["Metric","Why it is useful / limitation"]),width="stretch",hide_index=True)
     st.caption("Domain data is essential: taxonomy, policy, conversation history and failure costs change model rankings. The fixture suite checks plumbing; use a reviewed, untouched holdout for a deployment recommendation.")
 
 st.session_state["cfg"] = cfg
