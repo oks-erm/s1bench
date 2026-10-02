@@ -262,5 +262,64 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual(b.audit_report(report)[0],[])
 
 
+    def test_short_test_checks_each_selected_model_once_and_does_not_score_quality(self):
+        good=profile("good",endpoint=self.url+"/v1/systemone")
+        bad=profile("bad",endpoint=self.url+"/fail")
+        invalid=profile("invalid",api="openai",endpoint=self.url+"/invalid")
+        inactive={**profile("inactive",endpoint=self.url+"/v1/systemone"),"enabled":False}
+        cfg=config(good,bad,invalid,inactive)
+        cfg["protocol"].update(warmup_calls=2,repeat_cases=100,repetitions=3)
+        with tempfile.TemporaryDirectory() as root,patch.object(b,"refresh_prices",side_effect=AssertionError("No price lookup during connection test")):
+            result=b.run(cfg,[case("a"),case("z")],connection_test=True,output_root=root)
+            report=b.read_report(result["folder"])
+            self.assertIsNone(result["error"])
+            self.assertEqual(len(self.requests),3)
+            self.assertEqual(report["availability"]["good"]["status"],"responding")
+            self.assertEqual(report["availability"]["bad"]["status"],"unavailable")
+            self.assertEqual(report["availability"]["invalid"]["status"],"invalid_response")
+            self.assertNotIn("inactive",report["availability"])
+            self.assertEqual(report["manifest"]["run_kind"],"connection_test")
+            self.assertEqual(report["manifest"]["primary_cases"],0)
+            self.assertEqual(report["manifest"]["request_plan"]["maximum_requests"],3)
+            self.assertTrue(all(r["phase"]=="connection_check" and not r["scored"] for r in report["records"]))
+            self.assertEqual(len([r for r in report["records"] if b.primary_row(r)]),0)
+            summaries,*_=b.summarize(report["records"],report["cases"],report["config"],report["availability"])
+            self.assertTrue(all(r["success_rate"] is None and r["attempted"]==0 for r in summaries))
+            self.assertEqual(b.audit_report(report)[0],[])
+            self.assertEqual(cfg["protocol"]["warmup_calls"],2)
+            self.assertEqual(cfg["protocol"]["repetitions"],3)
+
+    def test_full_run_after_short_test_keeps_all_cases_and_original_protocol(self):
+        model=profile(endpoint=self.url+"/v1/systemone")
+        cfg=config(model)
+        cfg["protocol"].update(warmup_calls=1,repeat_cases=2,repetitions=3)
+        cases=[case("a"),case("b"),case("c")]
+        with tempfile.TemporaryDirectory() as root:
+            b.run(cfg,cases,connection_test=True,output_root=root)
+            self.assertEqual(len(self.requests),1)
+            result=b.run(cfg,cases,output_root=root)
+            report=b.read_report(result["folder"])
+            self.assertEqual(report["manifest"]["run_kind"],"benchmark")
+            self.assertEqual(len(report["cases"]),3)
+            self.assertEqual(len([r for r in report["records"] if b.primary_row(r)]),3)
+            self.assertEqual(report["manifest"]["issued_requests"],8)
+            self.assertEqual(sum(r["phase"]=="warmup" for r in report["records"]),1)
+            self.assertEqual(sum(r["phase"]=="repeat" for r in report["records"]),4)
+
+    def test_stop_connection_test_does_not_call_remaining_models(self):
+        cfg=config(profile("a",endpoint=self.url+"/v1/systemone"),
+                   profile("b",endpoint=self.url+"/v1/systemone"))
+        cancel=threading.Event()
+        def progress(event):
+            if event.get("row"):
+                cancel.set()
+        with tempfile.TemporaryDirectory() as root:
+            result=b.run(cfg,[case()],connection_test=True,cancel=cancel,progress=progress,output_root=root)
+            report=b.read_report(result["folder"])
+            self.assertTrue(result["interrupted"])
+            self.assertEqual(len(self.requests),1)
+            self.assertEqual(report["availability"]["b"]["status"],"cancelled")
+
+
 if __name__=="__main__":
     unittest.main()

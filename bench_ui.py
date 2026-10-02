@@ -17,7 +17,7 @@ BASE = Path(__file__).resolve().parent
 st.set_page_config(page_title="System 1 benchmark",page_icon="📊",layout="wide")
 
 class RunJob:
-    def __init__(self,cfg,cases,selected=None,limit=None):
+    def __init__(self,cfg,cases,selected=None,limit=None,connection_test=False):
         self.cancel = threading.Event()
         self.events = queue.Queue()
         self.finished = False
@@ -27,13 +27,15 @@ class RunJob:
         self.issued = 0
         self.maximum = 0
         self.messages = []
+        self.connection_test = connection_test
         cfg,cases = copy.deepcopy(cfg),copy.deepcopy(cases)
         if selected is not None:
             for model in cfg["models"]:
                 model["enabled"] = model["name"] in selected
         def work():
             try:
-                result = bench.run(cfg,cases,self.cancel,self.events.put,selected,limit)
+                result = bench.run(cfg,cases,self.cancel,self.events.put,selected,limit,
+                                   connection_test=connection_test)
                 self.folder,self.error = result["folder"],result["error"]
             except Exception as exc:
                 self.error = str(exc)
@@ -46,13 +48,6 @@ def change_config(cfg):
     st.session_state["cfg"] = copy.deepcopy(cfg)
     st.session_state["revision"] += 1
     st.rerun()
-
-def unique_alias(name,models):
-    existing = {m["name"].casefold() for m in models}
-    result,index = name,2
-    while result.casefold() in existing:
-        result,index = f"{name}-{index}",index+1
-    return result
 
 def show_data_help(busy):
     st.subheader("Plug your data")
@@ -192,7 +187,36 @@ Synthetic cases and AI draft labels are screening evidence.
             st.caption("No explicit labelled robustness pairs were supplied.")
         st.caption("Before final selection, freeze policy/rubrics and review critical or ambiguous gold independently. Tune on development data and confirm on a fresh holdout.")
 
+def connection_results_view(report):
+    st.subheader("Connection test")
+    if report["manifest"].get("interrupted"):
+        st.info("Test stopped; completed responses are shown below.")
+    status_labels = {"responding":"Responding","invalid_response":"Invalid response",
+                     "unavailable":"Failed","skipped":"Skipped","cancelled":"Stopped",
+                     "ready":"Not tested"}
+    records = {r["model"]:r for r in report["records"]}
+    aliases = report["manifest"].get("selected_models",list(report["availability"]))
+    models = {m["name"]:m for m in report["config"].get("models",[])}
+    rows = []
+    for alias in aliases:
+        model = models.get(alias,{})
+        row = records.get(alias,{})
+        status = report["availability"].get(alias,{})
+        latency = row.get("latency_s")
+        profile = row.get("profile") or {}
+        rows.append({"Model":model.get("display_name",alias),
+                     "Model ID":row.get("resolved_model") or model.get("model") or "(server default)",
+                     "Effort":profile.get("effort","n/a"),
+                     "Status":status_labels.get(status.get("status"),"Not tested"),
+                     "Latency ms":latency*1000 if bench.finite(latency) else None,
+                     "Details":status.get("detail") or row.get("error_detail") or ""})
+    st.dataframe(pd.DataFrame(rows),width="stretch",hide_index=True)
+    st.caption("Connection status only. Inspect Cases for full responses and errors.")
+
 def result_view(report,cfg):
+    if report["manifest"].get("run_kind")=="connection_test":
+        connection_results_view(report)
+        return
     errors,warnings = bench.audit_report(report)
     analysis_cfg = copy.deepcopy(report["config"])
     # Business target edits are scenarios; captured model settings stay frozen.
@@ -318,7 +342,9 @@ def case_view(report):
         return
     model = st.selectbox("Model",["All"]+sorted({r["model"] for r in rows}),key="case_model")
     task = st.selectbox("Use case",["All"]+sorted({r["task"] for r in rows}),key="case_task")
-    mode = st.selectbox("Cases",["Failures","All primary cases","Warmup / connection checks","Repeated sample"],key="case_mode")
+    mode = st.selectbox("Cases",["Failures","All primary cases","Warmup / connection checks","Repeated sample"],
+                        index=2 if report["manifest"].get("run_kind")=="connection_test" else 0,
+                        key="case_mode_"+report["folder"].name)
     selected = [r for r in rows if (model=="All" or r["model"]==model) and (task=="All" or r["task"]==task)]
     if mode=="Failures":
         selected = [r for r in selected if bench.primary_row(r) and not r["correct"]]
@@ -370,12 +396,11 @@ def model_editor(model,revision,busy):
     alias = model["name"]
     key = lambda field:f"m_{revision}_{alias}_{field}"
     with st.expander(f'{model.get("display_name",alias)} · {model.get("model") or "server default"}',expanded=model.get("enabled",False)):
-        a,b,c = st.columns([1,2,2])
-        model["enabled"] = a.checkbox("Include in runs",bool(model.get("enabled")),key=key("enabled"),disabled=busy)
-        model["display_name"] = b.text_input("Display name",model.get("display_name",alias),key=key("display"),disabled=busy)
+        a,b = st.columns(2)
+        model["display_name"] = a.text_input("Display name",model.get("display_name",alias),key=key("display"),disabled=busy)
         adapters = ["systemone","openai","ollama"]
         api = model.get("api","systemone")
-        model["api"] = c.selectbox("API adapter",adapters,index=adapters.index(api) if api in adapters else 0,
+        model["api"] = b.selectbox("API adapter",adapters,index=adapters.index(api) if api in adapters else 0,
                                   key=key("api"),disabled=busy)
         model["endpoint"] = st.text_input("Full inference URL",model.get("endpoint",""),key=key("endpoint"),disabled=busy)
         model["model"] = st.text_input("Exact model ID (blank only for SystemOne server default)",model.get("model",""),
@@ -500,7 +525,7 @@ models_tab,data_tab,run_tab,results_tab,cases_tab,guide_tab = st.tabs(
 
 with models_tab:
     st.subheader("One configuration")
-    st.caption("Set keys here or in config.json. An entered key takes precedence over the environment variable. Nothing asks for keys in the terminal.")
+    st.caption("Configure endpoints, model IDs and keys here. Choose which models to run on the Run tab.")
     upload_cfg = st.file_uploader("Load configuration",type=["json"],disabled=busy,key="upload_cfg")
     if upload_cfg:
         digest = bench.fingerprint(upload_cfg.getvalue().decode("utf-8-sig"))
@@ -512,26 +537,8 @@ with models_tab:
                 change_config(imported)
             except Exception as exc:
                 st.error(str(exc))
-    presets = {m["display_name"]:m for m in bench.default_config()["models"]}
-    with st.form(f"add_model_{revision}"):
-        choice = st.selectbox("Add a model",list(presets)+["Custom endpoint"],disabled=busy)
-        new_alias = st.text_input("Alias (optional)",disabled=busy)
-        add = st.form_submit_button("Add model",disabled=busy)
-    if add:
-        model = copy.deepcopy(presets[choice]) if choice in presets else {
-            "name":"custom","display_name":"Custom","enabled":False,"api":"systemone",
-            "endpoint":"http://127.0.0.1:8000/v1/systemone","model":"","deployment":"local","params":{}}
-        model["name"] = unique_alias(new_alias.strip() or model["name"],cfg["models"])
-        cfg["models"].append(model)
-        change_config(cfg)
     for model in cfg["models"]:
         model_editor(model,revision,busy)
-    if cfg["models"]:
-        aliases = [m["name"] for m in cfg["models"]]
-        remove = st.selectbox("Model to remove",aliases,key=f"remove_{revision}",disabled=busy)
-        if st.button("Remove model",disabled=busy):
-            cfg["models"] = [m for m in cfg["models"] if m["name"]!=remove]
-            change_config(cfg)
     settings_view(cfg,revision,busy)
     if st.button("Look up recent API prices",disabled=busy):
         with st.spinner("Checking the price registry; manual prices are preserved"):
@@ -596,33 +603,64 @@ with data_tab:
         cases = []
 
 with run_tab:
-    st.subheader("Run selected models")
-    enabled = [m for m in cfg["models"] if m.get("enabled")]
-    if enabled and cases:
+    st.subheader("Choose models")
+    selected = []
+    columns = st.columns(3)
+    for index,model in enumerate(cfg["models"]):
+        with columns[index%3]:
+            label = model.get("display_name",model["name"])
+            model["enabled"] = st.checkbox(label,value=bool(model.get("enabled")),
+                                           key=f"run_model_{revision}_{model['name']}",disabled=busy)
+            profile = bench.captured_profile(model)
+            st.caption(f"{profile['requested_model']} · effort={profile['effort']}")
+            if model["enabled"]:
+                selected.append(model["name"])
+    if not selected:
+        st.info("Tick the models you want to run.")
+    plan = None
+    run_cfg = copy.deepcopy(cfg)
+    try:
+        bench.validate_config(run_cfg)
+        if selected and cases:
+            plan = bench.request_plan(cases,run_cfg,selected)
+            a,b,c = st.columns(3)
+            a.metric("Dataset cases",len(cases))
+            b.metric("Selected models",len(selected))
+            c.metric("Maximum benchmark requests",plan["maximum_requests"])
+            st.caption(f"Complete dataset, plus {plan['warmup_per_model']} warm-ups/model and "
+                       f"{plan['repeat_cases']} consistency cases × {max(plan['repetitions']-1,0)} extra rounds.")
+    except Exception as exc:
+        st.error(str(exc))
+    if plan and plan["maximum_requests"]>plan["request_cap"]:
+        st.error(f"Full run needs up to {plan['maximum_requests']:,} requests; configured cap is {plan['request_cap']:,}.")
+    for model in cfg["models"]:
+        if model["name"] in selected:
+            issue = bench.model_problem(model)
+            if issue:
+                st.warning(model.get("display_name",model["name"])+": "+issue+" This model will be skipped.")
+    blocked = busy or not selected or not cases or bool(st.session_state["input_errors"]) or plan is None
+    full,test = st.columns(2)
+    if full.button("Run complete benchmark",type="primary",
+                   disabled=blocked or bool(plan and plan["maximum_requests"]>plan["request_cap"])):
         try:
-            plan = bench.request_plan(cases,cfg,None)
-            st.json(plan)
-            st.caption("This is a maximum request budget including warm-ups and repeat measurements. Runs are serial; unavailable models are skipped independently.")
-        except Exception as exc:
-            st.error(str(exc))
-    for model in enabled:
-        issue = bench.model_problem(model)
-        if issue:
-            st.warning(model["name"]+": "+issue)
-    if st.button("Start benchmark",type="primary",disabled=busy or not enabled or not cases or bool(st.session_state["input_errors"])):
-        try:
-            bench.validate_config(cfg)
-            bench.request_plan(cases,cfg,None)
-            st.session_state["job"] = RunJob(cfg,cases)
+            st.session_state["job"] = RunJob(run_cfg,cases,selected=selected)
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
-    if cfg["models"]:
-        alias = st.selectbox("Model for one-case check",[m["name"] for m in cfg["models"]],key="check_alias",disabled=busy)
-        st.caption("One-case check issues one inference request to that model. It may cost tokens; it creates a separate report.")
-        if st.button("Run one-case check",disabled=busy or not cases or bool(st.session_state["input_errors"])):
-            st.session_state["job"] = RunJob(cfg,cases,selected=[alias],limit=1)
+    if test.button("Test selected models",
+                   disabled=blocked or bool(plan and len(selected)>plan["request_cap"])):
+        try:
+            st.session_state["job"] = RunJob(run_cfg,cases,selected=selected,connection_test=True)
             st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+    st.caption("Short test: one inference request per ticked model, with response status and latency.")
+    current_job = st.session_state.get("job")
+    if current_job and current_job.finished and current_job.folder and current_job.connection_test:
+        try:
+            connection_results_view(bench.read_report(current_job.folder))
+        except Exception as exc:
+            st.error("Cannot load connection test: "+str(exc))
 
 report = None
 with results_tab:

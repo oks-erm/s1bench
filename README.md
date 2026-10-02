@@ -4,7 +4,7 @@ A local dashboard and CLI for comparing Jev, Laya, Nimble, GPT, CLM and other HT
 
 ## Run
 
-1. [Download the complete ZIP](https://github.com/oks-erm/s1bench/archive/refs/heads/codex/system-one-benchmark.zip) and extract it.
+1. [Download the complete ZIP](https://github.com/oks-erm/s1bench/archive/refs/heads/main.zip) and extract it.
 2. Install **Python 3.10+**. On Windows, enable **Add Python to PATH**.
 3. Open a terminal in the extracted folder:
 
@@ -15,7 +15,7 @@ A local dashboard and CLI for comparing Jev, Laya, Nimble, GPT, CLM and other HT
 
 Open **http://localhost:8501**. First launch installs dependencies.
 
-**This starts the dashboard only. Start local model servers separately.** In **Models & config**, add or enable models and fill their endpoint, model ID and API key. Save to the single local `config.json`. Models that are unavailable are skipped.
+**This starts the dashboard only. Start local model servers separately.** In **Models & config**, fill each model's endpoint, model ID and API key. Choose models using the checkboxes on **Run**. Save to the single local `config.json`. Models that are unavailable are skipped.
 
 Included presets:
 
@@ -29,7 +29,7 @@ Included presets:
 
 Local serving: [Ollama](https://ollama.com/) · [CLM](https://github.com/Contrastive-LM/CLM). Use the exact model ID served by your endpoint.
 
-Select data, then **Run → Start benchmark**. **Stop** prevents further requests; the current request may finish. Load saved runs in **Results** and export CSV or HTML.
+Select data, tick the models on **Run**, then click **Run complete benchmark**. It uses the entire dataset and configured consistency checks. **Test selected models** sends one short request to each ticked model. **Stop** prevents further requests; the current request may finish. Load saved runs in **Results** and export CSV or HTML.
 
 ## With your data
 

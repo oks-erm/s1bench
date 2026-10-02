@@ -1044,10 +1044,13 @@ def discover_models(model):
     return sorted({item.get("id") or item.get("name") or item.get("model") for item in entries
                    if isinstance(item,dict) and isinstance(item.get("id") or item.get("name") or item.get("model"),str)})
 
-def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, output_root=None):
+def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, output_root=None,
+        connection_test=False):
     cfg, cases = copy.deepcopy(cfg), copy.deepcopy(cases)
     validate_config(cfg)
     validate_data(cases, cfg)
+    if connection_test:
+        limit = 1
     if limit:
         cases = stratified_sample(cases, limit, cfg.get("seed",42))
     if limit == 1:
@@ -1059,6 +1062,8 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
     for model in cfg["models"]:
         model["enabled"] = model["name"] in names
     plan = request_plan(cases,cfg)
+    if connection_test:
+        plan.update(primary_cases=0, connection_cases_per_model=1)
     if plan["maximum_requests"] > plan["request_cap"]:
         raise ValueError(f"Request plan ({plan['maximum_requests']}) exceeds cap ({plan['request_cap']}).")
     protocol = {**default_config()["protocol"], **cfg.get("protocol",{})}
@@ -1095,7 +1100,7 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
         notify(row=row)
         return row
     try:
-        for message in refresh_prices(cfg):
+        for message in ([] if connection_test else refresh_prices(cfg)):
             notify(message)
         for model in models:
             alias = model["name"]
@@ -1107,6 +1112,19 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
                 notify(alias+": "+problem)
                 continue
             availability[alias] = {"status":"ready","detail":""}
+            if connection_test:
+                row = perform(model,cases[0],"connection_check")
+                if row is None:
+                    availability[alias] = {"status":"cancelled","detail":"Stopped before this request."}
+                elif row["api_error"]:
+                    availability[alias] = {"status":"unavailable","detail":row.get("error_detail") or row["api_error"]}
+                elif not row["valid"]:
+                    availability[alias] = {"status":"invalid_response","detail":"Endpoint responded, but its decision did not match the required answer shape."}
+                else:
+                    availability[alias] = {"status":"responding","detail":""}
+                detail = availability[alias].get("detail")
+                notify(alias+": "+(detail or availability[alias]["status"]))
+                continue
             for warmup in range(protocol["warmup_calls"]):
                 row = perform(model,cases[warmup % len(cases)],"warmup")
                 if row is None:
@@ -1116,7 +1134,7 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
                     availability[alias] = {"status":"unavailable","detail":row.get("error_detail") or row["api_error"]}
                     notify(alias+": "+availability[alias]["detail"])
                     break
-        for case_index,case in enumerate(cases):
+        for case_index,case in enumerate([] if connection_test else cases):
             if cancel.is_set():
                 interrupted = True
                 break
@@ -1197,9 +1215,10 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
         known = sum(by_currency.values()) if len(by_currency) <= 1 else None
         unknown = sum(r["_api_cost"] is None for r in priced)
         write_json(folder/"manifest.json",{
-            "method_version":METHOD_VERSION,"started_utc":started,"finished_utc":utc(),
+            "method_version":METHOD_VERSION,"run_kind":"connection_test" if connection_test else "benchmark",
+            "started_utc":started,"finished_utc":utc(),
             "selected_models":[m["name"] for m in models],"protocol":protocol,"request_plan":plan,
-            "primary_cases":len(cases),"families":len({c["cluster_id"] for c in cases}),
+            "primary_cases":0 if connection_test else len(cases),"families":len({c["cluster_id"] for c in cases}),
             "stability_sample_ids":repeat_ids,"issued_requests":issued,"recorded_requests":len(records),
             "interrupted":interrupted,"error":error,"dataset_sha256":fingerprint(cases),
             "config_sha256":fingerprint(scrub_config(cfg)),
@@ -1261,6 +1280,7 @@ def main():
     parser.add_argument("--models",help="Comma-separated profile aliases")
     parser.add_argument("--limit",type=int)
     parser.add_argument("--out")
+    parser.add_argument("--connection-test",action="store_true",help="One unscored request per selected model")
     args = parser.parse_args()
     if args.init:
         cfg,data = initialize()
@@ -1282,7 +1302,8 @@ def main():
             model["enabled"] = model["name"] in selected
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
-    result = run(cfg,cases,selected=selected,limit=args.limit,output_root=args.out,progress=progress)
+    result = run(cfg,cases,selected=selected,limit=args.limit,output_root=args.out,
+                 progress=progress,connection_test=args.connection_test)
     print("Results:",result["folder"])
     return 1 if result["error"] else 0
 
