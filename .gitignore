@@ -1,0 +1,9 @@
+config.json
+.venv/
+__pycache__/
+results/
+data/
+.price-cache.json
+*.bak
+*.tmp
+.env

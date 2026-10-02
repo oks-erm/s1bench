@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "timeout_s": 45,
+  "seed": 42,
+  "max_consecutive_errors": 3,
+  "protocol": {
+    "warmup_calls": 2,
+    "batches": 10,
+    "repeat_cases": 100,
+    "repetitions": 3,
+    "score_repeat_tolerance": 0.25,
+    "bootstrap_samples": 1000,
+    "max_requests": 10000
+  },
+  "business": {
+    "baseline": "gpt",
+    "max_quality_drop_pp": 2,
+    "min_cases": 200,
+    "min_families": 100,
+    "max_p95_ms": null,
+    "max_risk_percent": null,
+    "min_consistency_percent": null,
+    "monthly_volume": 100000,
+    "use_cases": {}
+  },
+  "tasks": {},
+  "models": [
+    {
+      "name": "jev",
+      "display_name": "Jev",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "https://api.typesafe.ai/v1/systemone",
+      "model": "jev-latest",
+      "api_key_env": "JEV_API_KEY",
+      "deployment": "hosted",
+      "params": {}
+    },
+    {
+      "name": "laya",
+      "display_name": "Laya",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "http://127.0.0.1:8000/v1/systemone",
+      "model": "",
+      "deployment": "local",
+      "params": {}
+    },
+    {
+      "name": "nimble",
+      "display_name": "Nimble",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "http://127.0.0.1:11434/v1/systemone",
+      "model": "nimble",
+      "deployment": "local",
+      "params": {}
+    },
+    {
+      "name": "gpt",
+      "display_name": "GPT Luna",
+      "enabled": false,
+      "api": "openai",
+      "endpoint": "https://api.openai.com/v1/responses",
+      "model": "",
+      "api_key_env": "OPENAI_API_KEY",
+      "deployment": "hosted",
+      "params": {}
+    },
+    {
+      "name": "clm",
+      "display_name": "CLM v0.1 8B",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "http://127.0.0.1:8700/v1/systemone",
+      "model": "clm-latest",
+      "deployment": "local",
+      "params": {},
+      "checkpoint_id": "Contrastive-LM/CLM-v0.1-8B",
+      "encoder_id": "Qwen/Qwen3-8B",
+      "serving_notes": "Reference defaults: 2048-token truncation; embedding caches. Verify actual server settings."
+    }
+  ]
+}
