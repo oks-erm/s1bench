@@ -68,6 +68,16 @@ labels, columns are predictions; invalid answers/API errors are included separat
 Only primary attempts count, so repeated checks do not inflate the matrix.
 Download again from a saved run to update an older HTML export; no model calls are needed.
 
+Cost analysis uses complete current rates for the same model and endpoint, falling
+back to the run's saved rates when current fields are blank. Explicit zero rates
+remain valid overrides. For direct TypeSafe responses identifying `jev-1.13.0`,
+the bundled [official list price](https://docs.typesafe.ai/models), verified
+2026-10-02, is $0.042 per million input tokens and free output. It is not applied to
+other returned versions or gateways. Manual rates take precedence. Missing usage
+or unverified prices remain unknown. Results and exported HTML show the applied
+rates, source and estimated total for all phases; these are not provider invoices.
+Repricing preserves the original responses and frozen run evidence.
+
 ## With your data
 
 Open **Plug your data** and upload labelled `.jsonl` files. The section includes a copyable AI preparation prompt and an example download. The included 1,400-case synthetic suite is for initial screening.

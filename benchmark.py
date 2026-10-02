@@ -368,12 +368,29 @@ def usage_for(row):
     cached = integer_tokens(row.get("cached_input_tokens", details.get("cached_tokens")))
     return inp, out, cached
 
+def has_prices(model):
+    rates = model.get("pricing_per_million")
+    return isinstance(rates,dict) and all(finite(rates.get(k)) and rates[k] >= 0 for k in ("input","output"))
+
+def published_jev_price(model, resolved_models=()):
+    """Dated direct-provider list price, only for a verified Jev 1.13 response."""
+    if (model.get("endpoint", "").rstrip("/") != "https://api.typesafe.ai/v1/systemone"
+            or model.get("api") != "systemone"
+            or model.get("model") not in {"jev-latest","jev-preview","jev-1.13.0"}
+            or set(resolved_models) != {"jev-1.13.0"}):
+        return {}
+    return {"pricing_per_million":{"input":.042,"output":0.0}, "pricing_currency":"USD",
+            "pricing_lookup":{"source":"TypeSafe official model reference", "url":"https://docs.typesafe.ai/models",
+                              "verified_date":"2026-10-02", "model":"jev-1.13.0"}}
+
 def api_cost(row, model):
     if local_model(model):
         return 0.0
-    rates = model.get("pricing_per_million")
-    if not isinstance(rates, dict) or any(not finite(rates.get(k)) or rates[k] < 0 for k in ("input", "output")):
+    if not has_prices(model):
+        model = {**model,**published_jev_price(model,[row.get("resolved_model")])}
+    if not has_prices(model):
         return None
+    rates = model["pricing_per_million"]
     inp, out, cached = usage_for(row)
     if (rates["input"] and inp is None) or (rates["output"] and out is None):
         return None
@@ -714,23 +731,50 @@ def risk_metrics(rows, task, kind, policy):
     return {"risk_exposures": n, "unsafe_decisions": len(unsafe), "risk_direction": direction if rows else None,
             "unsafe_rate": len(unsafe)/n if n else None, "unsafe_upper95": upper}
 
-def quotation(alias, archived, current=None):
+def quotation(alias, archived, current=None, resolved_models=()):
     run_model = next((m for m in archived.get("models", []) if m["name"] == alias), {})
     quote = copy.deepcopy(run_model)
     source = "prices saved with run"
     if current:
         now = next((m for m in current.get("models", []) if m["name"] == alias), None)
-        if now is not None and now.get("model", "") == run_model.get("model", ""):
+        same_identity = (now is not None
+                         and all(now.get(k,"") == run_model.get(k,"") for k in ("model","api"))
+                         and (now.get("endpoint") or "").rstrip("/") == (run_model.get("endpoint") or "").rstrip("/"))
+        if same_identity:
             quote = copy.deepcopy(now)
             quote["deployment"] = run_model.get("deployment", quote.get("deployment"))
             quote["api"] = run_model.get("api", quote.get("api"))
             quote["endpoint"] = run_model.get("endpoint", quote.get("endpoint"))
             source = "current configuration"
+            if not has_prices(now) and has_prices(run_model):
+                for key in ("pricing_per_million","pricing_currency","pricing_lookup"):
+                    quote.pop(key,None)
+                    if key in run_model:
+                        quote[key] = copy.deepcopy(run_model[key])
+                source = "saved rates: current configuration has no complete prices"
         elif now is not None:
-            source = "saved rates: current model ID differs"
+            source = "saved rates: current model or endpoint differs"
+    if not has_prices(quote):
+        published = published_jev_price(run_model,resolved_models)
+        if published:
+            quote.update(published)
+            source = "published Jev 1.13 list price, verified 2026-10-02"
     if local_model(run_model):
         quote["deployment"] = "local"
     return quote, source
+
+def cost_totals(records, quotes):
+    totals = []
+    for alias,quote in quotes.items():
+        rows = [r for r in records if r["model"]==alias]
+        known = [r["_api_cost"] for r in rows if r["_api_cost"] is not None]
+        rates = quote.get("pricing_per_million") or {}
+        totals.append({"model":alias,"requests":len(rows),"priced_requests":len(known),
+                       "estimated_api_cost":sum(known) if len(known)==len(rows) and rows else None,
+                       "known_api_cost":sum(known),"currency":quote.get("pricing_currency","USD"),
+                       "input_per_million":rates.get("input"),"output_per_million":rates.get("output"),
+                       "rate_basis":quote["rate_basis"]})
+    return totals
 
 def summarize(records, cases, cfg, availability=None, current_prices=None, repeat_ids=None, bootstrap=None):
     availability = availability or {}
@@ -740,7 +784,8 @@ def summarize(records, cases, cfg, availability=None, current_prices=None, repea
     for alias in aliases:
         model = next((m for m in cfg.get("models", []) if m["name"] == alias), {"name": alias, "api": "unknown", "endpoint": "", "model": ""})
         profiles[alias] = captured_profile(model)
-        quotes[alias], source = quotation(alias, cfg, current_prices)
+        resolved = {r.get("resolved_model") for r in records if r["model"]==alias and r.get("resolved_model")}
+        quotes[alias], source = quotation(alias, cfg, current_prices, resolved)
         quotes[alias]["rate_basis"] = source
     for case in cases:
         planned[(case.get("dataset", "legacy"), case["task"])].append(case)
@@ -1303,6 +1348,7 @@ def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batche
         "profiles":profiles,"quotes":{k:{**scrub_config({"models":[v]})["models"][0]} for k,v in quotes.items()},
         "known_api_cost":known,"known_api_cost_by_currency":dict(by_currency),"unknown_cost_requests":unknown,
         "full_api_estimate":known if not unknown else None,
+        "analysis_costs":cost_totals(priced,quotes),
     })
     manifest = parse((folder/"manifest.json").read_text("utf-8"))
     (folder/"report.html").write_text(html_report(summaries,profiles,manifest,confusion=confusion),encoding="utf-8")
@@ -1406,6 +1452,18 @@ def html_report(summaries, profiles, manifest, figures=None, confusion=None):
     charts = ""
     for index,figure in enumerate(figures or []):
         charts += figure.to_html(full_html=False,include_plotlyjs=True if index==0 else False)
+    costs = ""
+    if manifest.get("analysis_costs"):
+        cost_fields = ["model","requests","priced_requests","estimated_api_cost","currency",
+                       "input_per_million","output_per_million","rate_basis"]
+        cost_labels = ["Model","Requests","Requests priced","Estimated API cost","Currency",
+                       "Input / 1M tokens","Output / 1M tokens","Price basis"]
+        costs = ("<h2>Estimated API cost for this run</h2><p>Includes primary cases, warm-ups and repeats. "
+                 "These are rate-based estimates, not provider invoices. Rates applied in this analysis are shown below; "
+                 "original run evidence is retained separately.</p><table><tr>"+
+                 "".join("<th>"+cell(k)+"</th>" for k in cost_labels)+"</tr>")
+        costs += "".join("<tr>"+"".join("<td>"+cell(row.get(k))+"</td>" for k in cost_fields)+"</tr>"
+                         for row in manifest["analysis_costs"])+"</table>"
     matrices = ""
     if confusion:
         matrices = ("<h2>Confusion matrices</h2><p>Rows: expected label. Columns: predicted label. "
@@ -1443,7 +1501,7 @@ def html_report(summaries, profiles, manifest, figures=None, confusion=None):
             "td,th{padding:8px;border:1px solid #ddd;text-align:left}th{background:#f2f5f9}pre{white-space:pre-wrap}"
             ".confusion-matrix{margin:12px 0}.confusion-matrix summary{cursor:pointer;font-weight:600;padding:12px;background:#edf4fb}"
             ".matrix-scroll{overflow-x:auto}.confusion-matrix td{text-align:center}</style>"
-            "<h1>System 1 benchmark</h1><p>"+html.escape(note)+"</p>"+table+charts+matrices+
+            "<h1>System 1 benchmark</h1><p>"+html.escape(note)+"</p>"+costs+table+charts+matrices+
             "<h2>Captured model profiles</h2><pre>"+html.escape(json.dumps(profiles,indent=2))+
             "</pre><h2>Run evidence</h2><pre>"+html.escape(json.dumps(manifest,indent=2))+"</pre></html>")
 

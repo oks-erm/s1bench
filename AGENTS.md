@@ -34,6 +34,11 @@ and repeat coverage, rejects duplicate models, and records source fingerprints.
 Use it to recover one failed local model without rerunning paid providers. Preserve
 partial source reports; never silently replace model records or mix incompatible runs.
 CLM caps MLX's free-buffer cache at 256 MiB; its separate projection cache is unchanged.
+Pricing scenarios preserve saved rates when current fields are blank. Current rates
+must match both model and endpoint; explicit zero prices are valid. The dated Jev
+list-price fallback applies only to direct TypeSafe responses identifying Jev 1.13.0.
+Keep its official source/version/date visible. Never reuse that price for unknown
+versions or gateways. Repricing changes analysis exports, not frozen raw evidence.
 
 ## Commands and validation
 

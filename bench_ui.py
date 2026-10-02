@@ -316,6 +316,14 @@ def result_view(report,cfg):
             figures.append(fig)
         st.caption("p95 needs enough observations. These are sequential client timings, not concurrent load or throughput tests.")
     with tabs[2]:
+        st.subheader("Estimated API cost for this run")
+        totals = [{"Model":row["model"],"Estimated API cost":row["estimated_api_cost"],
+                   "Currency":row["currency"],"Requests priced":f"{row['priced_requests']} / {row['requests']}",
+                   "Input / 1M tokens":row["input_per_million"],"Output / 1M tokens":row["output_per_million"],
+                   "Price basis":row["rate_basis"]} for row in bench.cost_totals(records,quotes)]
+        st.dataframe(pd.DataFrame(totals),width="stretch",hide_index=True,
+                     column_config={"Estimated API cost":st.column_config.NumberColumn(format="%.6f")})
+        st.caption("Includes primary cases, warm-ups and repeats in this saved run. These are rate-based estimates, not provider invoices. Blank current prices fall back to saved rates; the applied rate basis is shown for each model.")
         fields = ["model","api_per_1k","cost_per_correct","cost_coverage","active_hosting_per_1k","active_total_per_1k",
                   "monthly_api","always_on_30day_hosting","currency","rate_basis"]
         st.dataframe(df[fields],width="stretch")
@@ -363,7 +371,9 @@ def result_view(report,cfg):
                             title=table["model"]+" · "+cohort[0]+" / "+cohort[1],template="plotly_white")
             st.plotly_chart(fig,width="stretch",theme=None)
     st.download_button("Download business CSV",bench.csv_bytes(visible),"business_report.csv",mime="text/csv")
-    export_manifest = {**report["manifest"],"analysis_business_targets":analysis_cfg["business"],"price_basis":basis}
+    export_manifest = {**report["manifest"],"analysis_business_targets":analysis_cfg["business"],"price_basis":basis,
+                       "analysis_costs":bench.cost_totals(records,quotes),
+                       "analysis_quotes":bench.scrub_config({"models":list(quotes.values())})["models"]}
     st.download_button("Download interactive HTML report",
                        bench.html_report(visible,profiles,export_manifest,figures,confusion=confusion),"benchmark_report.html",mime="text/html")
     st.session_state["analysis_records"] = records
