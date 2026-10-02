@@ -1,6 +1,6 @@
 # System 1 benchmark
 
-A local dashboard and CLI for comparing Jev, Laya, Nimble, GPT, CLM and other HTTP models on classification, yes/no decisions and rubric scores. Results show quality, latency, cost, errors and consistency by use case.
+A local dashboard and CLI for benchmarking System 1 models against GPT on classification, yes/no decisions and rubric scores. Results show quality, latency, cost, errors and consistency by use case.
 
 ## Run
 
