@@ -18,8 +18,10 @@ class DashboardTests(unittest.TestCase):
                 app.run()
                 self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
                 self.assertEqual(len(app.tabs),6)
-                self.assertTrue(any(x.label=="Start benchmark" for x in app.button))
-                enabled=next(x for x in app.checkbox if x.label=="Include in runs")
+                self.assertTrue(any(x.label=="Run complete benchmark" for x in app.button))
+                self.assertFalse(any(x.label in {"Add model","Remove model"} for x in app.button))
+                self.assertFalse(any(x.label in {"Add a model","Model to remove","Model for one-case check"} for x in app.selectbox))
+                enabled=next(x for x in app.tabs[2].checkbox if x.label=="Jev")
                 enabled.check().run()
                 self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
                 price=next(x for x in app.text_input if x.label=="Input price per million tokens")
@@ -55,3 +57,75 @@ class DashboardTests(unittest.TestCase):
                 self.assertTrue(any(x.value=="Business decision matrix" for x in app.subheader))
                 self.assertTrue(any(x.label=="Cost price basis" for x in app.selectbox))
                 self.assertTrue(any(x.label=="Protocol" for x in app.expander))
+
+
+    def test_run_tab_uses_checkboxes_and_full_data_or_all_selected_connection_test(self):
+        from streamlit.testing.v1 import AppTest
+        source=(Path(__file__).resolve().parents[1]/"bench_ui.py").read_text("utf-8")
+        calls=[]
+        def fake_run(cfg,cases,cancel=None,progress=None,selected=None,limit=None,output_root=None,
+                     connection_test=False):
+            calls.append({"models":[m["name"] for m in cfg["models"] if m.get("enabled")],
+                          "selected":selected,"cases":len(cases),"limit":limit,
+                          "connection_test":connection_test})
+            return {"folder":None,"error":None,"interrupted":False}
+        with tempfile.TemporaryDirectory() as root:
+            app=AppTest.from_string(source.replace(
+                'BASE = Path(__file__).resolve().parent','BASE = Path('+repr(root)+')'),default_timeout=30)
+            with patch.object(b,"BASE",Path(root)),patch.object(b,"run",side_effect=fake_run),patch(
+                    "urllib.request.urlopen",side_effect=AssertionError("No network in GUI test")):
+                app.run()
+                self.assertEqual(len(app.exception),0)
+                self.assertEqual({x.label for x in app.tabs[2].checkbox},
+                                 {"Jev","Laya","Nimble","GPT Luna","CLM v0.1 8B"})
+                self.assertEqual(len(app.tabs[2].selectbox),0)
+                full=next(x for x in app.button if x.label=="Run complete benchmark")
+                short=next(x for x in app.button if x.label=="Test selected models")
+                self.assertTrue(full.disabled)
+                self.assertTrue(short.disabled)
+                next(x for x in app.tabs[2].checkbox if x.label=="Laya").check().run()
+                next(x for x in app.tabs[2].checkbox if x.label=="Nimble").check().run()
+                next(x for x in app.button if x.label=="Run complete benchmark").click().run()
+                app.session_state["job"].thread.join(2)
+                self.assertEqual(len(calls),1)
+                self.assertEqual(calls[0]["models"],["laya","nimble"])
+                self.assertEqual(calls[0]["selected"],["laya","nimble"])
+                self.assertEqual(calls[0]["cases"],1400)
+                self.assertIsNone(calls[0]["limit"])
+                self.assertFalse(calls[0]["connection_test"])
+                app.run()
+                next(x for x in app.button if x.label=="Test selected models").click().run()
+                app.session_state["job"].thread.join(2)
+                self.assertEqual(len(calls),2)
+                self.assertEqual(calls[1]["selected"],["laya","nimble"])
+                self.assertTrue(calls[1]["connection_test"])
+                self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
+
+    def test_short_result_shows_connections_and_raw_errors_without_quality_matrix(self):
+        from streamlit.testing.v1 import AppTest
+        from test_benchmark import case, profile, prediction, config
+        source=(Path(__file__).resolve().parents[1]/"bench_ui.py").read_text("utf-8")
+        cfg=config(profile("working"),profile("broken"))
+        def fake_call(model,c,run_cfg):
+            row=prediction(c,alias=model["name"])
+            row.update(estimated_cost=0.,cost_currency="USD",raw={"mock":True})
+            if model["name"]=="broken":
+                row.update(api_error="HTTP_400",error_detail="Unsupported parameter",
+                           valid=False,correct=False,raw={"error":"Unsupported parameter"})
+            return row
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(b,"BASE",Path(root)),patch.object(b,"call_model",side_effect=fake_call):
+                result=b.run(cfg,[case("a"),case("z")],connection_test=True,output_root=Path(root)/"results")
+                b.write_json(Path(root)/"config.json",cfg)
+            app=AppTest.from_string(source.replace(
+                'BASE = Path(__file__).resolve().parent','BASE = Path('+repr(root)+')'),default_timeout=30)
+            app.session_state["report_folder"]=result["folder"]
+            with patch.object(b,"BASE",Path(root)),patch("urllib.request.urlopen",side_effect=AssertionError("No network in saved results")):
+                app.run()
+                self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
+                self.assertFalse(any(x.value=="Business decision matrix" for x in app.subheader))
+                self.assertTrue(any(x.value=="Connection test" for x in app.subheader))
+                status_tables=[x.value for x in app.dataframe if "Status" in x.value.columns]
+                self.assertTrue(status_tables)
+                self.assertEqual(set(status_tables[0]["Status"]),{"Responding","Failed"})
+                self.assertTrue(any(x.label=="Cases" and x.value=="Warmup / connection checks" for x in app.selectbox))
