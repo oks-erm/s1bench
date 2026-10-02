@@ -1,0 +1,24 @@
+name: Benchmark checks
+on:
+  push:
+    branches: [main, codex/system-one-benchmark]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: python -m py_compile benchmark.py bench_ui.py starter_data.py data_prompt.py start.py
+      - run: python -m unittest discover -s tests -v
