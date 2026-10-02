@@ -30,7 +30,7 @@ def main():
         print("Installing dashboard dependencies...",flush=True)
         subprocess.run([str(python),"-m","pip","install","-r",str(requirements)],cwd=BASE,check=True)
         marker.write_text(digest)
-    print("Starting dashboard. Model calls begin only when you start a run.",flush=True)
+    print("Starting dashboard.",flush=True)
     try:
         return subprocess.call([str(python),"-m","streamlit","run",str(BASE/"bench_ui.py"),
                                 "--server.address",args.host,"--server.port",str(args.port)],cwd=BASE)

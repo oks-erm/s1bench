@@ -489,7 +489,7 @@ busy = bool(job and not job.finished)
 st.session_state["input_errors"] = []
 
 st.title("System 1 benchmark")
-st.caption("Compare decisions by use case: quality, latency, cost, risk and consistency. Start model servers separately; this dashboard connects to their endpoints. No run starts automatically.")
+st.caption("Compare decisions by use case: quality, latency, cost, risk and consistency. Start model servers separately; this dashboard connects to their endpoints.")
 if st.session_state.get("config_load_error"):
     st.warning("Saved config could not be loaded: "+st.session_state["config_load_error"])
 if busy:
