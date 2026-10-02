@@ -60,6 +60,9 @@ Each run is saved under `results/` with `report.html`, `summary.csv`, raw respon
 frozen settings and evidence hashes. Reopen it from **Results → Recent run** after
 restarting. Config, keys, downloaded weights, uploaded data and results stay local
 and are excluded from Git. Back up results separately if you need to keep them.
+**Download interactive HTML report** includes the displayed quality and latency
+charts with their colours embedded, so they work outside the dashboard and offline.
+Download again from a saved run to update an older HTML export; no model calls are needed.
 
 ## With your data
 

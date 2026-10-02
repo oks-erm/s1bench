@@ -15,6 +15,10 @@ import local_runtime
 from data_prompt import EXAMPLE, preparation_prompt
 
 BASE = Path(__file__).resolve().parent
+# Real colours survive standalone HTML export; Streamlit's default template uses
+# near-black placeholders that only its frontend knows how to replace.
+MODEL_COLORS = {"jev":"#0072B2", "laya":"#E69F00", "nimble":"#009E73",
+                "gpt":"#8064C9", "clm":"#D55E00"}
 st.set_page_config(page_title="System 1 benchmark",page_icon="📊",layout="wide")
 
 class RunJob:
@@ -286,9 +290,13 @@ def result_view(report,cfg):
                          "risk_exposures","unsafe_upper95","risk_direction","auto_coverage","auto_accuracy"]],width="stretch")
         if not complete.empty:
             fig = px.bar(complete,x="model",y="success_rate",hover_data=["requested_model","effort","attempted","families"],
+                         color="model",color_discrete_map=MODEL_COLORS,
+                         color_discrete_sequence=px.colors.qualitative.Safe,template="plotly_white",
+                         labels={"model":"Model","success_rate":"Task success"},
                          title="Task success on complete matched cohorts")
             fig.update_yaxes(range=[0,1],tickformat=".0%")
-            st.plotly_chart(fig,width="stretch")
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig,width="stretch",theme=None)
             figures.append(fig)
         st.caption("Critical failures are test failures, not measured production harm. Unsafe errors follow the declared risk direction and safe labels.")
         pairs = [r for r in robustness if r["task"]==cohort[1]]
@@ -297,8 +305,11 @@ def result_view(report,cfg):
     with tabs[1]:
         st.dataframe(df[["model","p50_ms","p95_ms","attempt_p95_ms","timed_completed","api_errors"]],width="stretch")
         if not complete.empty:
-            fig = px.bar(complete,x="model",y=["p50_ms","p95_ms"],barmode="group",title="Client latency, milliseconds")
-            st.plotly_chart(fig,width="stretch")
+            fig = px.bar(complete,x="model",y=["p50_ms","p95_ms"],barmode="group",
+                         color_discrete_map={"p50_ms":"#0072B2","p95_ms":"#E69F00"},template="plotly_white",
+                         labels={"model":"Model","value":"Latency (ms)","variable":"Percentile"},
+                         title="Client latency, milliseconds")
+            st.plotly_chart(fig,width="stretch",theme=None)
             figures.append(fig)
         st.caption("p95 needs enough observations. These are sequential client timings, not concurrent load or throughput tests.")
     with tabs[2]:

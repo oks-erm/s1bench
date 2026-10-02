@@ -38,9 +38,9 @@ class DashboardTests(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
         from test_benchmark import case, profile, prediction, config
         source=(Path(__file__).resolve().parents[1]/"bench_ui.py").read_text("utf-8")
-        cfg=config(profile("fast"),profile("reference"))
+        cfg=config(*(profile(name) for name in ("jev","laya","nimble","gpt","clm")))
         cfg["protocol"].update(repetitions=3,repeat_cases=2)
-        cfg["business"]["baseline"]="reference"
+        cfg["business"]["baseline"]="gpt"
         def fake_call(model,c,run_cfg):
             row=prediction(c,alias=model["name"])
             row.update(estimated_cost=0.,cost_currency="USD",raw={"mock":True})
@@ -52,9 +52,23 @@ class DashboardTests(unittest.TestCase):
             app=AppTest.from_string(source.replace(
                 'BASE = Path(__file__).resolve().parent','BASE = Path('+repr(root)+')'),default_timeout=30)
             app.session_state["report_folder"]=result["folder"]
-            with patch.object(b,"BASE",Path(root)),patch("urllib.request.urlopen",side_effect=AssertionError("No network in saved results")):
+            with (patch.object(b,"BASE",Path(root)),
+                  patch("urllib.request.urlopen",side_effect=AssertionError("No network in saved results")),
+                  patch.object(b,"html_report",wraps=b.html_report) as export):
                 app.run()
                 self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
+                figures=export.call_args.args[3]
+                self.assertEqual(len(figures),2)
+                colors={trace.name:trace.marker.color for trace in figures[0].data}
+                self.assertEqual(set(colors),{"jev","laya","nimble","gpt","clm"})
+                self.assertEqual(len(set(colors.values())),5)
+                self.assertEqual(len({trace.marker.color for trace in figures[1].data}),2)
+                # Test the actual download path after Streamlit has rendered the charts.
+                standalone=export._mock_wraps(*export.call_args.args)
+                for figure in figures:
+                    self.assertNotRegex(figure.to_json(),r'#[0]{4}[0-9]{2}')
+                    for trace in figure.data:
+                        self.assertIn(trace.marker.color,standalone)
                 self.assertFalse(list(app.error),[x.value for x in app.error])
                 self.assertTrue(any(x.value=="Business decision matrix" for x in app.subheader))
                 self.assertTrue(any(x.label=="Cost price basis" for x in app.selectbox))
