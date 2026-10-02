@@ -182,9 +182,6 @@ def result_view(report,cfg):
         connection_results_view(report)
         return
     errors,warnings = bench.audit_report(report)
-    input_warnings = bench.input_warnings(report["cases"])
-    for warning in input_warnings:
-        st.warning(warning)
     analysis_cfg = copy.deepcopy(report["config"])
     # Business target edits are scenarios; captured model settings stay frozen.
     analysis_cfg["business"] = copy.deepcopy(cfg.get("business",bench.default_config()["business"]))

@@ -43,8 +43,9 @@ Use input_json (order-preserving) for requests/chat payloads and jsonl_bytes for
 snapshots. canonical sorts keys only for order-independent comparisons/hashes.
 Combining runs must check the request_serialization policy and ordered inputs;
 missing policy means legacy sorted_keys. Do not count identical saved option orders
-as an option-order robustness test. Keep old evidence unchanged and expose analysis
-warnings. CLM_DIAGNOSTIC.md records the local port investigation and its limits.
+as an option-order robustness test. Keep old evidence unchanged. CLM_DIAGNOSTIC.md
+records the local port investigation and its limits. CLM and option-order investigation
+notices are omitted from shared reports as requested; retain unrelated analysis warnings.
 `report_export.py` and `report_assets/` build a single-file offline viewer, embedding
 all datasets, cases and response evidence. Protocol text and the metric guide are
 shared with Streamlit. Reference comparisons use Python's existing summaries;

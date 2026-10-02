@@ -58,6 +58,21 @@ class ReportExportTests(unittest.TestCase):
         text=re.search(r"<script id='report-data' type='application/json'>(.*?)</script>",html,re.S).group(1)
         self.assertEqual(json.loads(text)["cases"][0]["input"],malicious)
 
+    def test_investigation_notes_are_omitted_without_hiding_other_notices(self):
+        report=self.fixture()
+        report["manifest"]["analysis_warnings"]=[
+            "CLM diagnostic: investigation details",
+            "Option-order robustness is unavailable for 20 labelled pairs.",
+            "Some requests have unknown costs."]
+        original=copy.deepcopy(report)
+        payload=export.build_payload(report)
+        self.assertEqual(payload["warnings"],["Some requests have unknown costs."])
+        self.assertEqual(payload["manifest"]["analysis_warnings"],payload["warnings"])
+        html=export.render_report(payload)
+        self.assertNotIn("CLM diagnostic:",html)
+        self.assertNotIn("Option-order robustness is unavailable",html)
+        self.assertEqual(report,original)
+
     @unittest.skipUnless(shutil.which("node"),"Node is only needed to validate offline browser calculations")
     def test_browser_fallback_matches_python_on_errors_missing_costs_and_currencies(self):
         report=self.fixture()

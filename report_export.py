@@ -37,7 +37,9 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
     manifest["price_basis"] = price_basis
     manifest["analysis_quotes"] = public_quotes
     manifest["analysis_costs"] = b.cost_totals(records, quotes)
-    warnings = list(dict.fromkeys(manifest.get("analysis_warnings", []) + b.input_warnings(report["cases"])))
+    # Investigation notes remain in the audit artifacts, not in shared reports.
+    warnings = list(dict.fromkeys(w for w in manifest.get("analysis_warnings", [])
+                                  if not w.startswith(("Option-order robustness is unavailable", "CLM diagnostic:"))))
     manifest["analysis_warnings"] = warnings
     return {"format_version": 1, "exported_utc": b.utc(), "run_name": Path(report.get("folder", "report")).name,
             "baseline": baseline, "summaries_by_reference": by_reference, "profiles": profiles,

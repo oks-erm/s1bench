@@ -63,7 +63,7 @@ records the serialization policy, and combining reports rejects different polici
 or different ordered inputs. Legacy reports can still be combined with each other.
 
 Analysis now excludes labelled option-order pairs whose saved criteria have the
-same order, and displays a warning in the dashboard and HTML exports. The original
+same order. These investigation notes are kept separately from shared reports. The original
 comparison has 20 such pairs. Primary task accuracy remains an observation of the
 original shared inputs; its option-order robustness figures are not valid evidence
 of order invariance. Historical raw responses and frozen snapshots are retained.
