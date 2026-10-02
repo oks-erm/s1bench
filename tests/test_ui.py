@@ -18,6 +18,8 @@ class DashboardTests(unittest.TestCase):
                 app.run()
                 self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
                 self.assertEqual(len(app.tabs),6)
+                self.assertFalse(any(x.label=="Include in runs" for x in app.checkbox))
+                self.assertFalse(any(x.key and x.key.startswith("run_model_") for x in app.tabs[0].checkbox))
                 self.assertTrue(any(x.label=="Run complete benchmark" for x in app.button))
                 self.assertFalse(any(x.label in {"Add model","Remove model"} for x in app.button))
                 self.assertFalse(any(x.label in {"Add a model","Model to remove","Model for one-case check"} for x in app.selectbox))
@@ -57,6 +59,17 @@ class DashboardTests(unittest.TestCase):
                 self.assertTrue(any(x.value=="Business decision matrix" for x in app.subheader))
                 self.assertTrue(any(x.label=="Cost price basis" for x in app.selectbox))
                 self.assertTrue(any(x.label=="Protocol" for x in app.expander))
+                self.assertTrue(any("Loaded report: "+result["folder"] in x.value for x in app.caption))
+                from types import SimpleNamespace
+                import queue
+                app.session_state["job"]=SimpleNamespace(
+                    finished=True,notified=True,folder=result["folder"],error=None,
+                    issued=54,maximum=8010,messages=[],events=queue.Queue(),connection_test=False)
+                app.run()
+                next(x for x in app.button if x.label=="Load selected run").click().run()
+                self.assertEqual(len(app.exception),0,[x.message for x in app.exception])
+                self.assertFalse(any("Requests issued" in x.value for x in app.markdown))
+                self.assertNotIn("job",app.session_state)
 
 
     def test_run_tab_uses_checkboxes_and_full_data_or_all_selected_connection_test(self):
@@ -64,21 +77,22 @@ class DashboardTests(unittest.TestCase):
         source=(Path(__file__).resolve().parents[1]/"bench_ui.py").read_text("utf-8")
         calls=[]
         def fake_run(cfg,cases,cancel=None,progress=None,selected=None,limit=None,output_root=None,
-                     connection_test=False):
+                     connection_test=False,model_session=None):
             calls.append({"models":[m["name"] for m in cfg["models"] if m.get("enabled")],
                           "selected":selected,"cases":len(cases),"limit":limit,
-                          "connection_test":connection_test})
+                          "connection_test":connection_test,"managed":model_session is not None})
             return {"folder":None,"error":None,"interrupted":False}
         with tempfile.TemporaryDirectory() as root:
             app=AppTest.from_string(source.replace(
                 'BASE = Path(__file__).resolve().parent','BASE = Path('+repr(root)+')'),default_timeout=30)
-            with patch.object(b,"BASE",Path(root)),patch.object(b,"run",side_effect=fake_run),patch(
+            with patch("local_runtime.can_manage",return_value=True),patch.object(b,"BASE",Path(root)),patch.object(b,"run",side_effect=fake_run),patch(
                     "urllib.request.urlopen",side_effect=AssertionError("No network in GUI test")):
                 app.run()
                 self.assertEqual(len(app.exception),0)
                 self.assertEqual({x.label for x in app.tabs[2].checkbox},
                                  {"Jev","Laya","Nimble","GPT Luna","CLM v0.1 8B"})
                 self.assertEqual(len(app.tabs[2].selectbox),0)
+                self.assertFalse(any("effort=n/a" in x.value for x in app.tabs[2].caption))
                 full=next(x for x in app.button if x.label=="Run complete benchmark")
                 short=next(x for x in app.button if x.label=="Test selected models")
                 self.assertTrue(full.disabled)
@@ -93,6 +107,7 @@ class DashboardTests(unittest.TestCase):
                 self.assertEqual(calls[0]["cases"],1400)
                 self.assertIsNone(calls[0]["limit"])
                 self.assertFalse(calls[0]["connection_test"])
+                self.assertTrue(calls[0]["managed"])
                 app.run()
                 next(x for x in app.button if x.label=="Test selected models").click().run()
                 app.session_state["job"].thread.join(2)

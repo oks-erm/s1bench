@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -394,7 +395,7 @@ def captured_profile(model):
             "deployment": "local" if local_model(model) else "hosted",
             "checkpoint_id": model.get("checkpoint_id"), "checkpoint_revision": model.get("checkpoint_revision"),
             "encoder_id": model.get("encoder_id"), "encoder_revision": model.get("encoder_revision"),
-            "serving_notes": model.get("serving_notes")}
+            "serving_notes": model.get("serving_notes"), "notes": model.get("notes")}
 
 def chat_messages(case):
     q = case["question"]
@@ -1044,8 +1045,45 @@ def discover_models(model):
     return sorted({item.get("id") or item.get("name") or item.get("model") for item in entries
                    if isinstance(item,dict) and isinstance(item.get("id") or item.get("name") or item.get("model"),str)})
 
+@contextmanager
+def run_lock(root):
+    """One benchmark per results directory, including across dashboard tabs."""
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    with (root/".benchmark.lock").open("a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+            lock.seek(0, 2)
+            if not lock.tell():
+                lock.write(b"0")
+                lock.flush()
+            lock.seek(0)
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as exc:
+                raise ValueError("A benchmark is already running. Follow or stop it in its original tab.") from exc
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise ValueError("A benchmark is already running. Follow or stop it in its original tab.") from exc
+            yield
+
+
 def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, output_root=None,
-        connection_test=False):
+        connection_test=False, model_session=None):
+    with run_lock(output_root or BASE/"results"):
+        return _run(cfg,cases,cancel,progress,selected,limit,output_root,connection_test,model_session)
+
+
+def _run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, output_root=None,
+        connection_test=False, model_session=None):
     cfg, cases = copy.deepcopy(cfg), copy.deepcopy(cases)
     validate_config(cfg)
     validate_data(cases, cfg)
@@ -1099,10 +1137,9 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
             stream.write(canonical(row)+"\n")
         notify(row=row)
         return row
-    try:
-        for message in ([] if connection_test else refresh_prices(cfg)):
-            notify(message)
-        for model in models:
+    def execute_group(group):
+        nonlocal interrupted
+        for model in group:
             alias = model["name"]
             problem = model_problem(model)
             if not problem and not local_model(model) and model.get("api") in {"systemone","openai"} and not model_key(model):
@@ -1138,7 +1175,7 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
             if cancel.is_set():
                 interrupted = True
                 break
-            rotated = models[case_index % len(models):] + models[:case_index % len(models)]
+            rotated = group[case_index % len(group):] + group[:case_index % len(group)]
             for model in rotated:
                 alias = model["name"]
                 if availability.get(alias,{}).get("status") != "ready":
@@ -1162,7 +1199,7 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
                 if cancel.is_set():
                     interrupted = True
                     break
-                for model in models:
+                for model in group:
                     if availability.get(model["name"],{}).get("status") != "ready":
                         continue
                     row = perform(model,case,"repeat",repetition)
@@ -1175,6 +1212,22 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
                             availability[model["name"]] = {"status":"stopped","detail":"Consecutive API errors during repeats."}
                     else:
                         consecutive[model["name"]] = 0
+    try:
+        for message in ([] if connection_test else refresh_prices(cfg)):
+            notify(message)
+        if model_session is None:
+            execute_group(models)
+        else:
+            for model in models:
+                if cancel.is_set():
+                    break
+                notify("Preparing " + model["name"])
+                try:
+                    with model_session(model):
+                        execute_group([model])
+                except Exception as exc:
+                    availability[model["name"]] = {"status": "unavailable", "detail": str(exc)}
+                    notify(model["name"] + ": " + str(exc))
     except KeyboardInterrupt:
         interrupted = True
         cancel.set()
@@ -1183,52 +1236,136 @@ def run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outpu
         notify("Run stopped: "+error)
     finally:
         interrupted = interrupted or cancel.is_set()
-        # Rewrite once so connection-check phase corrections are persisted.
-        (folder/"raw.jsonl").write_bytes(jsonl_bytes(records) if records else b"")
-        write_json(folder/"config.snapshot.json",scrub_config(cfg))
-        (folder/"data.snapshot.jsonl").write_bytes(jsonl_bytes(cases))
-        write_json(folder/"availability.json",availability)
-        summaries, priced, profiles, quotes, stability, robustness = summarize(records,cases,cfg,availability,repeat_ids=repeat_ids)
-        for name, rows in (("summary.csv",summaries),("stability.csv",stability),("robustness.csv",robustness)):
-            (folder/name).write_bytes(csv_bytes(rows))
-        failures = [r for r in records if primary_row(r) and not r["correct"]]
-        (folder/"failures.jsonl").write_bytes(jsonl_bytes(failures) if failures else b"")
-        batch_results = []
-        for batch in sorted(set(batches.values())):
-            subset = [c for c in cases if batches[c["id"]] == batch]
-            subset_rows = [r for r in records if primary_row(r) and r.get("batch") == batch]
-            rows, *_ = summarize(subset_rows,subset,cfg,availability,bootstrap=100)
-            batch_results += [{"batch":batch,**r} for r in rows]
-        (folder/"batches.csv").write_bytes(csv_bytes(batch_results))
-        confusion = {}
-        for row in records:
-            if primary_row(row) and row["type"] in {"choice","noul"}:
-                key = row["model"]+" / "+row["dataset"]+" / "+row["task"]
-                table = confusion.setdefault(key,{})
-                gold, pred = str(row["expected"]), str(row["decision"]) if row["valid"] else "(invalid/API error)"
-                table.setdefault(gold,{})[pred] = table.setdefault(gold,{}).get(pred,0)+1
-        write_json(folder/"confusion.json",confusion)
-        by_currency = defaultdict(float)
-        for row in priced:
-            if row["_api_cost"] is not None:
-                by_currency[quotes[row["model"]].get("pricing_currency", "USD")] += row["_api_cost"]
-        known = sum(by_currency.values()) if len(by_currency) <= 1 else None
-        unknown = sum(r["_api_cost"] is None for r in priced)
-        write_json(folder/"manifest.json",{
-            "method_version":METHOD_VERSION,"run_kind":"connection_test" if connection_test else "benchmark",
-            "started_utc":started,"finished_utc":utc(),
-            "selected_models":[m["name"] for m in models],"protocol":protocol,"request_plan":plan,
-            "primary_cases":0 if connection_test else len(cases),"families":len({c["cluster_id"] for c in cases}),
-            "stability_sample_ids":repeat_ids,"issued_requests":issued,"recorded_requests":len(records),
-            "interrupted":interrupted,"error":error,"dataset_sha256":fingerprint(cases),
-            "config_sha256":fingerprint(scrub_config(cfg)),
-            "profiles":profiles,"quotes":{k:{**scrub_config({"models":[v]})["models"][0]} for k,v in quotes.items()},
-            "known_api_cost":known,"known_api_cost_by_currency":dict(by_currency),"unknown_cost_requests":unknown,
-            "full_api_estimate":known if not unknown else None,
-        })
-        seal(folder)
+        save_report(folder,records,cases,cfg,availability,repeat_ids=repeat_ids,batches=batches,
+                    protocol=protocol,plan=plan,models=models,started=started,
+                    interrupted=interrupted,error=error,issued=issued,connection_test=connection_test,
+                    execution_order="model_by_model" if model_session else "interleaved")
     notify("Saved "+str(folder))
     return {"folder":str(folder),"error":error,"interrupted":interrupted}
+
+def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batches,
+                protocol, plan, models, started, interrupted=False, error=None,
+                issued=None, connection_test=False, execution_order="interleaved", sources=None):
+    folder = Path(folder)
+    issued = len(records) if issued is None else issued
+    # Rewrite once so connection-check phase corrections are persisted.
+    (folder/"raw.jsonl").write_bytes(jsonl_bytes(records) if records else b"")
+    write_json(folder/"config.snapshot.json",scrub_config(cfg))
+    (folder/"data.snapshot.jsonl").write_bytes(jsonl_bytes(cases))
+    write_json(folder/"availability.json",availability)
+    summaries, priced, profiles, quotes, stability, robustness = summarize(records,cases,cfg,availability,repeat_ids=repeat_ids)
+    for name, rows in (("summary.csv",summaries),("stability.csv",stability),("robustness.csv",robustness)):
+        (folder/name).write_bytes(csv_bytes(rows))
+    failures = [r for r in records if primary_row(r) and not r["correct"]]
+    (folder/"failures.jsonl").write_bytes(jsonl_bytes(failures) if failures else b"")
+    batch_results = []
+    for batch in sorted(set(batches.values())):
+        subset = [c for c in cases if batches[c["id"]] == batch]
+        subset_rows = [r for r in records if primary_row(r) and r.get("batch") == batch]
+        rows, *_ = summarize(subset_rows,subset,cfg,availability,bootstrap=100)
+        batch_results += [{"batch":batch,**r} for r in rows]
+    (folder/"batches.csv").write_bytes(csv_bytes(batch_results))
+    confusion = {}
+    for row in records:
+        if primary_row(row) and row["type"] in {"choice","noul"}:
+            key = row["model"]+" / "+row["dataset"]+" / "+row["task"]
+            table = confusion.setdefault(key,{})
+            gold, pred = str(row["expected"]), str(row["decision"]) if row["valid"] else "(invalid/API error)"
+            table.setdefault(gold,{})[pred] = table.setdefault(gold,{}).get(pred,0)+1
+    write_json(folder/"confusion.json",confusion)
+    by_currency = defaultdict(float)
+    for row in priced:
+        if row["_api_cost"] is not None:
+            by_currency[quotes[row["model"]].get("pricing_currency", "USD")] += row["_api_cost"]
+    known = sum(by_currency.values()) if len(by_currency) <= 1 else None
+    unknown = sum(r["_api_cost"] is None for r in priced)
+    write_json(folder/"manifest.json",{
+        "method_version":METHOD_VERSION,"run_kind":"connection_test" if connection_test else "benchmark",
+        "started_utc":started,"finished_utc":utc(),
+        "selected_models":[m["name"] for m in models],"protocol":protocol,"request_plan":plan,
+        "execution_order":execution_order,"sources":sources or [],
+        "primary_cases":0 if connection_test else len(cases),"families":len({c["cluster_id"] for c in cases}),
+        "stability_sample_ids":repeat_ids,"issued_requests":issued,"recorded_requests":len(records),
+        "interrupted":interrupted,"error":error,"dataset_sha256":fingerprint(cases),
+        "config_sha256":fingerprint(scrub_config(cfg)),
+        "profiles":profiles,"quotes":{k:{**scrub_config({"models":[v]})["models"][0]} for k,v in quotes.items()},
+        "known_api_cost":known,"known_api_cost_by_currency":dict(by_currency),"unknown_cost_requests":unknown,
+        "full_api_estimate":known if not unknown else None,
+    })
+    manifest = parse((folder/"manifest.json").read_text("utf-8"))
+    (folder/"report.html").write_text(html_report(summaries,profiles,manifest),encoding="utf-8")
+    seal(folder)
+
+def combine_reports(selections, output_root=None):
+    """Combine explicitly selected, complete model runs without making API calls."""
+    reports = [(read_report(path), list(aliases)) for path, aliases in selections]
+    if not reports or any(not aliases for _, aliases in reports):
+        raise ValueError("Choose at least one model from each source report.")
+    first = reports[0][0]
+    cases, cfg = copy.deepcopy(first["cases"]), copy.deepcopy(first["config"])
+    protocol = first["manifest"]["protocol"]
+    repeated = first["manifest"]["stability_sample_ids"]
+    case_ids = {c["id"] for c in cases}
+    dataset = canonical(sorted(cases, key=lambda c: c["id"]))
+    settings = canonical({k:v for k,v in cfg.items() if k != "models"})
+    records, models, availability, sources, batches = [], [], {}, [], {}
+    seen = set()
+    for report, aliases in reports:
+        errors, warnings = audit_report(report)
+        if errors or warnings:
+            raise ValueError("Source evidence audit failed: " + str(report["folder"]))
+        manifest = report["manifest"]
+        if manifest.get("method_version") != METHOD_VERSION or manifest.get("run_kind") != "benchmark":
+            raise ValueError("Only benchmark reports with the current method can be combined.")
+        if canonical(sorted(report["cases"], key=lambda c: c["id"])) != dataset:
+            raise ValueError("Source datasets or frozen labels differ.")
+        if (manifest["protocol"] != protocol or manifest["stability_sample_ids"] != repeated
+                or canonical({k:v for k,v in report["config"].items() if k != "models"}) != settings):
+            raise ValueError("Source scoring settings, protocol or repeat samples differ.")
+        for alias in aliases:
+            if alias in seen:
+                raise ValueError("Choose exactly one source per model: " + alias)
+            seen.add(alias)
+            profile = next((m for m in report["config"]["models"] if m["name"] == alias and m.get("enabled")), None)
+            rows = [r for r in report["records"] if r["model"] == alias]
+            primary = [r for r in rows if primary_row(r)]
+            repeats = [r for r in rows if r["phase"] == "repeat"]
+            expected_repeats = {(identity, n) for identity in repeated
+                                for n in range(2, protocol["repetitions"] + 1)}
+            if (profile is None or len(primary) != len(case_ids)
+                    or {r["id"] for r in primary} != case_ids
+                    or len(repeats) != len(expected_repeats)
+                    or {(r["id"], r["repetition"]) for r in repeats} != expected_repeats
+                    or sum(r["phase"] == "warmup" for r in rows) != protocol["warmup_calls"]
+                    or len(rows) != len(primary) + len(repeats) + protocol["warmup_calls"]):
+                raise ValueError("Source model does not have a complete protocol: " + alias)
+            for row in primary:
+                if row["id"] in batches and batches[row["id"]] != row.get("batch"):
+                    raise ValueError("Source batch assignments differ.")
+                batches[row["id"]] = row.get("batch")
+            models.append(copy.deepcopy(profile))
+            availability[alias] = copy.deepcopy(report["availability"].get(alias, {"status":"ready","detail":""}))
+            for source_row in rows:
+                row = copy.deepcopy(source_row)
+                row["source_request_index"] = row["request_index"]
+                row["source_run"] = report["folder"].name
+                row["request_index"] = len(records) + 1
+                records.append(row)
+        sources.append({"folder":str(report["folder"].resolve()),"models":aliases,
+                        "started_utc":manifest["started_utc"],"finished_utc":manifest["finished_utc"],
+                        "source_interrupted":manifest["interrupted"],
+                        "evidence_sha256":hashlib.sha256((report["folder"]/"evidence.json").read_bytes()).hexdigest()})
+    cfg["models"] = models
+    root = Path(output_root or BASE/"results")
+    with run_lock(root):
+        folder = root/(datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")+"_combined_"+os.urandom(3).hex())
+        folder.mkdir(parents=True)
+        save_report(folder,records,cases,cfg,availability,repeat_ids=repeated,batches=batches,
+                    protocol=protocol,plan=request_plan(cases,cfg),models=models,
+                    started=min(r["manifest"]["started_utc"] for r,_ in reports),
+                    execution_order="model_by_model_combined",sources=sources)
+    return {"folder":str(folder),"error":None,"interrupted":False}
+
 
 def initialize():
     cfg_path = BASE/"config.json"
@@ -1281,6 +1418,7 @@ def main():
     parser.add_argument("--limit",type=int)
     parser.add_argument("--out")
     parser.add_argument("--connection-test",action="store_true",help="One unscored request per selected model")
+    parser.add_argument("--manage-local",action="store_true",help="Start and stop installed Mac models sequentially in one report")
     args = parser.parse_args()
     if args.init:
         cfg,data = initialize()
@@ -1302,8 +1440,13 @@ def main():
             model["enabled"] = model["name"] in selected
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be positive")
+    cancel = threading.Event()
+    session = None
+    if args.manage_local:
+        from local_runtime import model_session
+        session = lambda model: model_session(model,cancel)
     result = run(cfg,cases,selected=selected,limit=args.limit,output_root=args.out,
-                 progress=progress,connection_test=args.connection_test)
+                 progress=progress,connection_test=args.connection_test,cancel=cancel,model_session=session)
     print("Results:",result["folder"])
     return 1 if result["error"] else 0
 

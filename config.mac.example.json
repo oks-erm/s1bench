@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "timeout_s": 180,
+  "seed": 42,
+  "max_consecutive_errors": 3,
+  "protocol": {
+    "warmup_calls": 2,
+    "batches": 10,
+    "repeat_cases": 100,
+    "repetitions": 3,
+    "score_repeat_tolerance": 0.25,
+    "bootstrap_samples": 1000,
+    "max_requests": 10000
+  },
+  "business": {
+    "baseline": "gpt",
+    "max_quality_drop_pp": 2,
+    "min_cases": 200,
+    "min_families": 100,
+    "max_p95_ms": null,
+    "max_risk_percent": null,
+    "min_consistency_percent": null,
+    "monthly_volume": 100000,
+    "use_cases": {}
+  },
+  "tasks": {},
+  "models": [
+    {
+      "name": "jev",
+      "display_name": "Jev",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "https://api.typesafe.ai/v1/systemone",
+      "model": "jev-latest",
+      "api_key_env": "JEV_API_KEY",
+      "deployment": "hosted",
+      "params": {}
+    },
+    {
+      "name": "laya",
+      "display_name": "Laya (English, MPS)",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "http://127.0.0.1:8000/v1/systemone",
+      "model": "english",
+      "deployment": "local",
+      "params": {},
+      "checkpoint_id": "convaiinnovations/laya",
+      "checkpoint_revision": "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851",
+      "serving_notes": "Official laya 0.3.23; English checkpoint; Apple MPS; run alone on this 16 GB Mac. Runtime clamps choice:11+ temperature to 0.5; affected confidence is uncalibrated."
+    },
+    {
+      "name": "nimble",
+      "display_name": "Nimble",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "http://127.0.0.1:11435/v1/systemone",
+      "model": "nimble",
+      "deployment": "local",
+      "params": {},
+      "serving_notes": "Project-local Ollama 0.35.0; Metal; default Nimble weights. Run alone on this 16 GB Mac."
+    },
+    {
+      "name": "gpt",
+      "display_name": "GPT Luna",
+      "enabled": false,
+      "api": "openai",
+      "endpoint": "https://api.openai.com/v1/responses",
+      "model": "gpt-6-luna",
+      "api_key_env": "OPENAI_API_KEY",
+      "deployment": "hosted",
+      "params": {}
+    },
+    {
+      "name": "clm",
+      "display_name": "CLM v0.1 8B (community MLX 8-bit)",
+      "enabled": false,
+      "api": "systemone",
+      "endpoint": "http://127.0.0.1:8700/v1/systemone",
+      "model": "mlx-community/CLM-v0.1-8B-MLX-8bit",
+      "deployment": "local",
+      "params": {},
+      "checkpoint_id": "mlx-community/CLM-v0.1-8B-MLX-8bit",
+      "encoder_id": "Qwen/Qwen3-8B",
+      "serving_notes": "User-approved unofficial MLX 8-bit port. Released float32 heads; group size 64; first 2048 tokens; 4096-entry projection cache; batch_tokens=2048. Quantization may change decisions. Run alone on this 16 GB Mac.",
+      "checkpoint_revision": "eb39b6c777c579720f7a1458f2614be4508a4e15",
+      "encoder_revision": "b968826d9c46dd6066d109eabc6255188de91218"
+    }
+  ]
+}

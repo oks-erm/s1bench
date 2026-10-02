@@ -13,9 +13,20 @@ A local dashboard and CLI for benchmarking System 1 models against GPT on classi
 | Windows | `py start.py` |
 | macOS / Linux | `python3 start.py` |
 
-Open **http://localhost:8501**. First launch installs dependencies.
+Open **http://127.0.0.1:8501**. First launch creates `.venv` and installs dashboard
+dependencies. Later launches reuse it. Keep the terminal open; Ctrl+C stops the dashboard.
 
-**This starts the dashboard only. Start local model servers separately.** In **Models & config**, fill each model's endpoint, model ID and API key. Choose models using the checkboxes on **Run**. Save to the single local `config.json`. Models that are unavailable are skipped.
+For **Laya, Nimble and CLM on an Apple Silicon Mac**, follow the one-time
+[local model setup](LOCAL_SETUP.md#install-on-a-fresh-apple-silicon-mac). Once installed
+and configured, the dashboard starts and stops these models automatically, one at a
+time, to fit a 16 GB Mac. Other local endpoints require separately running servers.
+Model weights are downloaded separately; they are not included in this repository.
+
+In **Models & config**, set endpoints, exact model IDs and API-key environment-variable
+names, then save. Choose participants using the checkboxes on **Run**. All selected
+models, including Jev and GPT, appear in **one comparison report**. Missing or failed
+models are shown as incomplete. Configure keys before starting paid providers;
+opening the dashboard does not run the benchmark.
 
 Included presets:
 
@@ -27,9 +38,28 @@ Included presets:
 | GPT | `https://api.openai.com/v1/responses` |
 | CLM | `http://127.0.0.1:8700/v1/systemone` |
 
+The Mac setup uses a separate Nimble server on **11435** and supplies a configuration
+example with the matching model IDs. CLM on Mac uses the clearly labelled community
+MLX 8-bit port, whose answers may differ from the reference model.
+
 Local serving: [Ollama](https://ollama.com/) · [CLM](https://github.com/Contrastive-LM/CLM). Use the exact model ID served by your endpoint.
 
 Select data, tick the models on **Run**, then click **Run complete benchmark**. It uses the entire dataset and configured consistency checks. **Test selected models** sends one short request to each ticked model. **Stop** prevents further requests; the current request may finish. Load saved runs in **Results** and export CSV or HTML.
+
+## API keys and saved results
+
+Use `JEV_API_KEY` and `OPENAI_API_KEY` in the environment of the terminal that launches
+`start.py`; in Models & config, keep the literal key blank and set its variable name.
+See [persistent macOS Keychain setup](LOCAL_SETUP.md#api-keys-across-sessions).
+Keep **Include entered keys when saving locally** unchecked: keys typed into the
+dashboard then stay session-only, and saving stores the variable name, not the key.
+`.env` files are **not** loaded automatically. Restart the dashboard
+after changing its environment.
+
+Each run is saved under `results/` with `report.html`, `summary.csv`, raw responses,
+frozen settings and evidence hashes. Reopen it from **Results → Recent run** after
+restarting. Config, keys, downloaded weights, uploaded data and results stay local
+and are excluded from Git. Back up results separately if you need to keep them.
 
 ## With your data
 
@@ -50,6 +80,28 @@ python benchmark.py --data your_data.jsonl --config config.json
 ```
 
 Use `py` on Windows or `python3` on macOS/Linux. Keep the complete downloaded folder together.
+For installed Mac models, add `--manage-local` to run them sequentially in one report:
+
+```sh
+.venv/bin/python benchmark.py --data data/starter.jsonl --config config.json \
+  --models jev,laya,nimble,gpt,clm --manage-local
+```
+
+The dashboard creates the starter dataset on first launch. The CLI also supports
+`python3 benchmark.py --init`. Select only models you have configured; hosted calls
+may incur provider charges.
+
+## Development checks
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 -m py_compile benchmark.py bench_ui.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
+```
+
+Use `.venv/bin/python` on macOS/Linux or `.venv\Scripts\python.exe` on Windows after
+initial setup. Tests use fake model responses and do not make paid inference calls.
+GitHub Actions runs the suite on Linux, Windows and macOS. See [AGENTS.md](AGENTS.md)
+for architecture and maintenance notes.
 
 ## Protocol
 

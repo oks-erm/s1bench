@@ -1,0 +1,3 @@
+[client]
+# This is a benchmark dashboard; publishing controls are not part of its workflow.
+toolbarMode = "viewer"

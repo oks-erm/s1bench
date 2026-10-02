@@ -11,6 +11,7 @@ import plotly.express as px
 import streamlit as st
 
 import benchmark as bench
+import local_runtime
 from data_prompt import EXAMPLE, preparation_prompt
 
 BASE = Path(__file__).resolve().parent
@@ -34,8 +35,11 @@ class RunJob:
                 model["enabled"] = model["name"] in selected
         def work():
             try:
+                options = {}
+                if any(local_runtime.can_manage(m) for m in cfg["models"] if m.get("enabled")):
+                    options["model_session"] = lambda model: local_runtime.model_session(model,self.cancel)
                 result = bench.run(cfg,cases,self.cancel,self.events.put,selected,limit,
-                                   connection_test=connection_test)
+                                   connection_test=connection_test,**options)
                 self.folder,self.error = result["folder"],result["error"]
             except Exception as exc:
                 self.error = str(exc)
@@ -214,6 +218,7 @@ def connection_results_view(report):
     st.caption("Connection status only. Inspect Cases for full responses and errors.")
 
 def result_view(report,cfg):
+    st.caption("Loaded report: "+str(report["folder"]))
     if report["manifest"].get("run_kind")=="connection_test":
         connection_results_view(report)
         return
@@ -423,7 +428,8 @@ def model_editor(model,revision,busy):
         except ValueError as exc:
             st.error(str(exc))
             st.session_state["input_errors"].append(alias+": parameters")
-        st.caption('GPT Responses effort: {"reasoning":{"effort":"low"}} if your model supports it. Chat endpoint: {"reasoning_effort":"low"}. No unsupported options are added automatically.')
+        if api == "openai":
+            st.caption('GPT Responses effort: {"reasoning":{"effort":"low"}} if your model supports it. Chat endpoint: {"reasoning_effort":"low"}. No unsupported options are added automatically.')
         rates = model.get("pricing_per_million",{})
         if bench.local_model(model):
             st.info("Local API fee: $0. Add hosting cost below to compare infrastructure.")
@@ -514,17 +520,19 @@ busy = bool(job and not job.finished)
 st.session_state["input_errors"] = []
 
 st.title("System 1 benchmark")
-st.caption("Compare decisions by use case: quality, latency, cost, risk and consistency. Start model servers separately; this dashboard connects to their endpoints.")
-if st.session_state.get("config_load_error"):
-    st.warning("Saved config could not be loaded: "+st.session_state["config_load_error"])
-if busy:
-    st.warning("A run is active. Use Stop below to prevent further requests.")
-run_progress()
+st.caption("Compare model quality, speed, cost and consistency on your data.")
+# Keep one stable slot above navigation: adding progress must not reset the active tab.
+with st.container():
+    if st.session_state.get("config_load_error"):
+        st.warning("Saved config could not be loaded: "+st.session_state["config_load_error"])
+    if busy:
+        st.warning("A run is active. Use Stop below to prevent further requests.")
+    run_progress()
 models_tab,data_tab,run_tab,results_tab,cases_tab,guide_tab = st.tabs(
     ["Models & config","Plug your data","Run","Results","Cases","Metric guide"])
 
 with models_tab:
-    st.subheader("One configuration")
+    st.subheader("Model settings")
     st.caption("Configure endpoints, model IDs and keys here. Choose which models to run on the Run tab.")
     upload_cfg = st.file_uploader("Load configuration",type=["json"],disabled=busy,key="upload_cfg")
     if upload_cfg:
@@ -604,19 +612,25 @@ with data_tab:
 
 with run_tab:
     st.subheader("Choose models")
+    st.caption("Select models for one comparison report. Configure their connections in Models & config.")
     selected = []
-    columns = st.columns(3)
-    for index,model in enumerate(cfg["models"]):
-        with columns[index%3]:
-            label = model.get("display_name",model["name"])
-            model["enabled"] = st.checkbox(label,value=bool(model.get("enabled")),
-                                           key=f"run_model_{revision}_{model['name']}",disabled=busy)
-            profile = bench.captured_profile(model)
-            st.caption(f"{profile['requested_model']} · effort={profile['effort']}")
-            if model["enabled"]:
-                selected.append(model["name"])
+    for model in cfg["models"]:
+        label = model.get("display_name",model["name"])
+        profile = bench.captured_profile(model)
+        details = ["Local" if bench.local_model(model) else "API", profile["requested_model"]]
+        if profile["effort"] not in ("n/a", "unspecified"):
+            details.append("Reasoning: "+str(profile["effort"]))
+        model["enabled"] = st.checkbox(label,value=bool(model.get("enabled")),
+                                       key=f"run_model_{revision}_{model['name']}",
+                                       help=" · ".join(details),disabled=busy)
+        if model["enabled"]:
+            selected.append(model["name"])
     if not selected:
         st.info("Tick the models you want to run.")
+    if any(local_runtime.can_manage(m) for m in cfg["models"] if m.get("enabled")):
+        st.info("Installed local models start and stop automatically, one at a time. All selected models share one report. Stop any separately launched model server first.")
+    if not cases:
+        st.info("Choose a dataset in Plug your data before running a benchmark or connection test.")
     plan = None
     run_cfg = copy.deepcopy(cfg)
     try:
@@ -671,14 +685,19 @@ with results_tab:
     if saved and str(saved) not in paths:
         paths.insert(0,str(saved))
     if paths:
-        selected = st.selectbox("Recent run",paths,index=paths.index(str(saved)) if str(saved) in paths else 0,key="recent_run")
+        selected = st.selectbox("Recent run",paths,index=paths.index(str(saved)) if str(saved) in paths else 0,
+                                key="recent_run_"+str(saved or ""))
         if st.button("Load selected run",disabled=busy):
             st.session_state["report_folder"] = selected
             st.session_state.pop("report_cache",None)
+            st.session_state.pop("job",None)
+            st.rerun()
     custom_folder = st.text_input("Or path to an earlier results folder",key="old_folder")
     if st.button("Load this folder",disabled=busy or not custom_folder.strip()):
         st.session_state["report_folder"] = custom_folder
         st.session_state.pop("report_cache",None)
+        st.session_state.pop("job",None)
+        st.rerun()
     folder = st.session_state.get("report_folder")
     if folder:
         try:
