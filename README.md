@@ -50,3 +50,22 @@ python benchmark.py --data your_data.jsonl --config config.json
 ```
 
 Use `py` on Windows or `python3` on macOS/Linux. Keep the complete downloaded folder together.
+
+## Protocol
+
+Use a **paired evaluation design**: each model receives the same labelled cases and decision rubric. Freeze thresholds, model IDs, effort and business targets before evaluation. Report each dataset/use case separately; compare models only on complete, matched cohorts.
+
+Defaults: **2 warm-up calls/model**, **10 balanced batches** with related cases kept together, and **100 stratified cases evaluated 3 times**. Primary outcomes are pooled once. Batches are partitions, not independent datasets; repetitions measure consistency without increasing the independent accuracy sample size. The short connection test is unscored.
+
+**95% confidence intervals** use Wilson intervals for independent cases or a **cluster bootstrap** over case families. Differences from the reference model use paired inference. Grouping avoids pseudoreplication; insufficient or degenerate evidence remains inconclusive. Frozen data/config snapshots and a fixed sampling seed support reproducibility.
+
+| Measure | Metrics |
+| --- | --- |
+| Classification | Task success (`success_rate`), macro F1, NONE precision/recall |
+| Numeric decisions | Brier score for binary probabilities; mean absolute error (MAE) for rubric scores |
+| Risk and reliability | Unsafe-decision rate per risk exposure, critical failures, valid-answer rate, API errors |
+| Stability | Repeat agreement, all-repetitions-correct rate, critical repeat flips; labelled robustness pair success |
+| Latency | Client p50/p95 after warm-up; attempt p95 includes failed requests |
+| Economics | API cost/1,000 decisions, cost/correct decision, cost coverage; separate hosting scenarios |
+
+API failures and invalid answers count against task success. Read Brier/MAE alongside validity coverage. Costs use recorded token usage; missing paid usage remains unknown. Use a **reviewed domain holdout** separate from development data: synthetic fixtures establish screening results, not production performance. Intervals are unadjusted for multiple comparisons; confirm model selection on a fresh holdout.
