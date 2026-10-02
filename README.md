@@ -108,6 +108,21 @@ The dashboard creates the starter dataset on first launch. The CLI also supports
 `python3 benchmark.py --init`. Select only models you have configured; hosted calls
 may incur provider charges.
 
+Requests and snapshots preserve JSON field and option order. Reports created before
+the option-order fix used alphabetically sorted keys; their option-order stress
+checks are excluded from current analysis when both saved orders are identical.
+Old and new serialization policies cannot be mixed in one combined report.
+Existing dataset files are retained. To create a fresh starter suite without
+overwriting one, run this once with an unused filename, then select that file under
+**Plug your data → Local path or dataset manifest**:
+
+```sh
+python3 -c 'from benchmark import jsonl_bytes; from starter_data import generate; open("data/starter_ordered.jsonl", "xb").write(jsonl_bytes(generate()))'
+```
+
+See [CLM investigation](CLM_DIAGNOSTIC.md) for the saved comparison's repeated CLM
+answers, local checks, prompt sensitivity, and limits of the community MLX port.
+
 ## Development checks
 
 ```sh

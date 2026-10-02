@@ -68,6 +68,33 @@ class CombineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "audit"):
                 b.combine_reports([(first, ["a", "b"]), (second, ["c"])], output_root=root)
 
+    def test_rejects_changed_option_order_or_serialization(self):
+        for change in ("order", "serialization"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as root, patch.object(b, "call_model", side_effect=self.call):
+                first, second = self.make_runs(root)
+                report = b.read_report(second)
+                if change == "order":
+                    criteria = report["cases"][0]["question"]["criteria"]
+                    report["cases"][0]["question"]["criteria"] = dict(reversed(list(criteria.items())))
+                    (Path(second)/"data.snapshot.jsonl").write_bytes(b.jsonl_bytes(report["cases"]))
+                else:
+                    report["manifest"].pop("request_serialization")
+                    b.write_json(Path(second)/"manifest.json", report["manifest"])
+                b.seal(second)
+                with self.assertRaisesRegex(ValueError, "datasets|serialization"):
+                    b.combine_reports([(first, ["a", "b"]), (second, ["c"])], output_root=root)
+
+    def test_legacy_combination_keeps_original_serialization(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(b, "call_model", side_effect=self.call):
+            first, second = self.make_runs(root)
+            for folder in (first, second):
+                report = b.read_report(folder)
+                report["manifest"].pop("request_serialization")
+                b.write_json(Path(folder)/"manifest.json", report["manifest"])
+                b.seal(folder)
+            combined = b.combine_reports([(first, ["a", "b"]), (second, ["c"])], output_root=root)
+            self.assertEqual(b.read_report(combined["folder"])["manifest"]["request_serialization"], "sorted_keys")
+
 
 if __name__ == "__main__":
     unittest.main()

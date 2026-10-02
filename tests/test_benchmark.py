@@ -69,6 +69,33 @@ class CoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 b.parse(text)
 
+    def test_snapshot_preserves_reordered_options_and_state_fields(self):
+        cases = generate()
+        restored = [b.parse(line) for line in b.jsonl_bytes(cases).decode().splitlines()]
+        self.assertEqual(b.input_warnings(restored), [])
+        for original, saved in zip(cases, restored):
+            self.assertEqual(b.input_json(original), b.input_json(saved))
+        ordered = {"z": 1, "a": 2}
+        self.assertEqual(list(b.parse(b.jsonl_bytes([ordered]).decode())), ["z", "a"])
+        # Canonical fingerprints remain independent of dictionary insertion order.
+        self.assertEqual(b.fingerprint(ordered), b.fingerprint(dict(reversed(list(ordered.items())))))
+
+    def test_ineffective_order_pairs_are_not_reported_as_robustness(self):
+        a = case("a")
+        a.update(pair_id="order", pair_relation="option_order")
+        z = copy.deepcopy(a)
+        z["id"] = "z"
+        rows = [prediction(a), prediction(z)]
+        self.assertEqual(b.robustness_summary(rows, [a, z], config()), [])
+        warnings = b.input_warnings([a, z])
+        self.assertIn("1 labelled pairs", warnings[0])
+        self.assertIn(warnings[0], b.html_report([], {}, {"analysis_warnings": warnings}))
+        z["question"]["criteria"] = dict(reversed(list(z["question"]["criteria"].items())))
+        self.assertEqual(b.input_warnings([a, z]), [])
+        result = b.robustness_summary(rows, [a, z], config())
+        self.assertEqual(result[0]["complete_pairs"], 1)
+        self.assertEqual(result[0]["agreement"], 1)
+
     def test_pluggable_data_and_manifest(self):
         cfg = config()
         with tempfile.TemporaryDirectory() as folder:
@@ -228,6 +255,26 @@ class HTTPTests(unittest.TestCase):
         invalid=b.call_model(profile(api="openai",endpoint=self.url+"/invalid"),case(),config())
         self.assertFalse(invalid["valid"])
         self.assertIsNone(invalid["api_error"])
+
+    def test_adapters_preserve_option_and_state_order_on_the_wire(self):
+        for api, path in [("systemone", "/v1/systemone"), ("openai", "/v1/responses"),
+                          ("openai", "/v1/chat/completions"), ("ollama", "/api/chat")]:
+            for reverse in [False, True]:
+                item = case()
+                item["input"] = {"z_message": "Request", "a_context": "Context"}
+                if reverse:
+                    item["question"]["criteria"] = dict(reversed(list(item["question"]["criteria"].items())))
+                model = profile(api, api, self.url + path)
+                self.assertTrue(b.call_model(model, item, config(model))["valid"])
+                body = self.requests[-1][1]
+                if api == "systemone":
+                    state, question = body["state"], body["questions"]["answer"]
+                else:
+                    content = body["input"] if path.endswith("/responses") else body["messages"][1]["content"]
+                    supplied = b.parse(content)
+                    state, question = supplied["state"], supplied["question"]
+                self.assertEqual(list(question["criteria"]), list(item["question"]["criteria"]))
+                self.assertEqual(list(state), list(item["input"]))
 
     def test_unavailable_model_does_not_prevent_good_run(self):
         good=profile("good",endpoint=self.url+"/v1/systemone")

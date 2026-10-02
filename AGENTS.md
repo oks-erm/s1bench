@@ -39,6 +39,12 @@ must match both model and endpoint; explicit zero prices are valid. The dated Je
 list-price fallback applies only to direct TypeSafe responses identifying Jev 1.13.0.
 Keep its official source/version/date visible. Never reuse that price for unknown
 versions or gateways. Repricing changes analysis exports, not frozen raw evidence.
+Use input_json (order-preserving) for requests/chat payloads and jsonl_bytes for
+snapshots. canonical sorts keys only for order-independent comparisons/hashes.
+Combining runs must check the request_serialization policy and ordered inputs;
+missing policy means legacy sorted_keys. Do not count identical saved option orders
+as an option-order robustness test. Keep old evidence unchanged and expose analysis
+warnings. CLM_DIAGNOSTIC.md records the local port investigation and its limits.
 
 ## Commands and validation
 

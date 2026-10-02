@@ -227,6 +227,9 @@ def result_view(report,cfg):
         connection_results_view(report)
         return
     errors,warnings = bench.audit_report(report)
+    input_warnings = bench.input_warnings(report["cases"])
+    for warning in input_warnings:
+        st.warning(warning)
     analysis_cfg = copy.deepcopy(report["config"])
     # Business target edits are scenarios; captured model settings stay frozen.
     analysis_cfg["business"] = copy.deepcopy(cfg.get("business",bench.default_config()["business"]))
@@ -372,6 +375,7 @@ def result_view(report,cfg):
             st.plotly_chart(fig,width="stretch",theme=None)
     st.download_button("Download business CSV",bench.csv_bytes(visible),"business_report.csv",mime="text/csv")
     export_manifest = {**report["manifest"],"analysis_business_targets":analysis_cfg["business"],"price_basis":basis,
+                       "analysis_warnings":input_warnings,
                        "analysis_costs":bench.cost_totals(records,quotes),
                        "analysis_quotes":bench.scrub_config({"models":list(quotes.values())})["models"]}
     st.download_button("Download interactive HTML report",
