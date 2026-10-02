@@ -114,6 +114,7 @@ class CoreTests(unittest.TestCase):
         summaries,*_ = b.summarize([prediction(cases[0])],cases,config())
         self.assertNotEqual(summaries[0]["status"],"complete")
         self.assertEqual(summaries[0]["planned"],3)
+        self.assertIsNone(summaries[0]["success_ci_low"])
         self.assertAlmostEqual(summaries[0]["success_rate"],1/3)
 
     def test_paired_intervals_and_boundary_caution(self):

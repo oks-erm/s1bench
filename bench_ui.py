@@ -123,7 +123,7 @@ Native decision models receive typed requests; chat models return the same
 decision in JSON. Adapters render content differently, so results describe
 the configured deployment. Inspect captured IDs, parameters and effort.
 
-**Quality.** Each primary case counts once. API failures and invalid answers
+**Quality.** Each primary case counts once. Partial-run success divides by all planned cases; unattempted cases are not successes. Sampling intervals are withheld for partial cohorts. API failures and invalid answers
 count as failures for task success. Choice uses exact labels, noul uses the
 saved decision threshold, and scores use the saved tolerance. F1 balances
 represented gold classes. Brier and MAE use valid numeric outputs; read

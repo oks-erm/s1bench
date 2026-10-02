@@ -601,7 +601,7 @@ def request_plan(cases, cfg, selected=None):
 
 def pending_label(case):
     status = str(case.get("review_status", "")).lower()
-    return status in {"draft", "needs_review", "unreviewed"} or (
+    return status not in {"reviewed", "approved", "fixture_generated"} or (
         case.get("label_source") == "ai_draft" and status not in {"reviewed", "approved"})
 
 def primary_row(row):
