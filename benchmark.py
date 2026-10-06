@@ -216,6 +216,12 @@ def validate_data(cases, cfg):
             tol = task_settings(case, cfg).get("tolerance", .5)
             if not finite(tol) or tol < 0:
                 raise ValueError(f"Case {label}: invalid score tolerance.")
+        if "critical_error_choices" in case:
+            risk = case["critical_error_choices"]
+            if (kind != "choice" or not isinstance(risk, list) or
+                    any(not isinstance(x,str) or x not in criteria or x == gold for x in risk) or
+                    len(set(risk)) != len(risk)):
+                raise ValueError(f"Case {label}: invalid directional risk labels.")
         canonical(case)
         content = fingerprint([case["task"], state_for(case), q])
         if content in content_gold and canonical(gold) != content_gold[content]:
@@ -416,7 +422,31 @@ def captured_profile(model):
             "deployment": "local" if local_model(model) else "hosted",
             "checkpoint_id": model.get("checkpoint_id"), "checkpoint_revision": model.get("checkpoint_revision"),
             "encoder_id": model.get("encoder_id"), "encoder_revision": model.get("encoder_revision"),
-            "serving_notes": model.get("serving_notes"), "notes": model.get("notes")}
+            "serving_notes": model.get("serving_notes"), "notes": model.get("notes"),
+            "deployment_eligibility": model.get("deployment_eligibility", "unknown"),
+            "identity_evidence": model.get("identity_evidence", {"status": "unavailable"}),
+            "effective_settings": {"explicit": params, "unspecified": "provider-default; effective values unknown"}}
+
+def response_settings(rows):
+    """Allowlisted settings explicitly returned by the provider, never guessed."""
+    reported = defaultdict(dict)
+    for row in rows:
+        raw = row.get('raw')
+        if isinstance(raw,str):
+            try:raw=parse(raw)
+            except (ValueError,TypeError):continue
+        if not isinstance(raw,dict):continue
+        for key in ('temperature','top_p','max_output_tokens','service_tier','truncation','reasoning'):
+            if key not in raw:continue
+            value=raw[key]
+            if key=='reasoning':
+                if not isinstance(value,dict):continue
+                value={k:v for k,v in value.items() if k in {'effort','mode','context'} and (v is None or isinstance(v,(str,int,float,bool)))}
+                if not value:continue
+            elif value is not None and not isinstance(value,(str,int,float,bool)):
+                continue
+            reported[key][canonical(value)]=copy.deepcopy(value)
+    return {key:list(values.values()) for key,values in reported.items()}
 
 def chat_messages(case):
     q = case["question"]
@@ -437,6 +467,8 @@ def call_model(model, case, cfg):
            "api_error": None, "error_detail": None, "raw": None,
            "input_tokens": None, "output_tokens": None, "cached_input_tokens": None,
            "resolved_model": None, "profile": captured_profile(model)}
+    if "critical_error_choices" in case:
+        row["critical_error_choices"] = copy.deepcopy(case["critical_error_choices"])
     params = copy.deepcopy(model.get("params", {}))
     api = model["api"]
     responses = api == "openai" and urllib.parse.urlsplit(model["endpoint"]).path.rstrip("/").endswith("/responses")
@@ -657,8 +689,15 @@ def repeat_summary(records, cases, cfg, sample_ids=None):
             valid = all(r.get("valid") and not r.get("api_error") for r in rows)
             total["valid"] += int(valid)
             total["all_correct"] += int(all(r.get("correct") for r in rows))
-            total["critical_flips"] += int(case.get("critical", False) and any(r["correct"] for r in rows)
-                                           and not all(r["correct"] for r in rows))
+            if 'critical_error_choices' in case:
+                unsafe = [r.get('valid') and not r.get('api_error') and
+                          r.get('decision') in case['critical_error_choices'] for r in rows]
+                safe = [r.get('valid') and not r.get('api_error') and
+                        r.get('decision') not in case['critical_error_choices'] for r in rows]
+                total['critical_flips'] += int(any(unsafe) and any(safe))
+            else:
+                total["critical_flips"] += int(case.get("critical", False) and any(r["correct"] for r in rows)
+                                               and not all(r["correct"] for r in rows))
             if valid:
                 if rows[0]["type"] == "score":
                     values = [r["value"] for r in rows]
@@ -724,6 +763,16 @@ def robustness_summary(records, cases, cfg):
             for (m,d,t,relation), v in sorted(totals.items())]
 
 def risk_metrics(rows, task, kind, policy):
+    if kind == "choice" and any("critical_error_choices" in r for r in rows):
+        from decision_analysis import directional, RISK_VERSION
+        exposed = [r for r in rows if r.get("critical_error_choices")]
+        unsafe = sum(directional(r) for r in exposed)
+        n = len(exposed)
+        independent = n and len({r["cluster_id"] for r in exposed}) == n
+        upper = ((1 - .05**(1/n)) if not unsafe else wilson(unsafe, n)[1]) if independent else None
+        return {"risk_exposures": n, "unsafe_decisions": unsafe, "risk_direction": RISK_VERSION,
+                "unsafe_rate": unsafe/n if n else None, "unsafe_upper95": upper,
+                "risk_policy": RISK_VERSION, "risk_policy_status": "proposed_not_business_approved"}
     safe = set(policy.get("safe_labels", SAFE))
     exposed, unsafe = [], []
     for row in rows:
@@ -805,13 +854,19 @@ def summarize(records, cases, cfg, availability=None, current_prices=None, repea
     for alias in aliases:
         model = next((m for m in cfg.get("models", []) if m["name"] == alias), {"name": alias, "api": "unknown", "endpoint": "", "model": ""})
         profiles[alias] = captured_profile(model)
+        profiles[alias]['effective_settings']['provider_reported'] = response_settings(r for r in records if r['model']==alias)
+        profiles[alias]['effective_settings']['reported_basis'] = 'Direct response metadata; omitted/null values remain unknown. Provider declarations are not independent verification.'
         resolved = {r.get("resolved_model") for r in records if r["model"]==alias and r.get("resolved_model")}
         quotes[alias], source = quotation(alias, cfg, current_prices, resolved)
         quotes[alias]["rate_basis"] = source
     for case in cases:
         planned[(case.get("dataset", "legacy"), case["task"])].append(case)
+    case_index = {c["id"]: c for c in cases}
     for raw in records:
         row = copy.deepcopy(raw)
+        case = case_index.get(row["id"], {})
+        if "critical_error_choices" in case:
+            row["critical_error_choices"] = copy.deepcopy(case["critical_error_choices"])
         row.setdefault("dataset", "legacy")
         row.setdefault("cluster_id", row["id"])
         row["_api_cost"] = api_cost(row, quotes[row["model"]])
@@ -836,6 +891,9 @@ def summarize(records, cases, cfg, availability=None, current_prices=None, repea
             kind = cohort[0]["question"]["type"]
             costs = [r["_api_cost"] for r in rows if r["_api_cost"] is not None]
             policy = {**business, **business.get("use_cases", {}).get(task, {})}
+            if cfg.get('shve_protocol'):
+                from decision_analysis import policy_for, REVIEW_LABELS
+                policy['safe_labels'] = policy_for(cfg,task).get('review_labels',REVIEW_LABELS)
             lo, hi, method = success_interval(rows, samples, cfg.get("seed", 42))
             quote, profile = quotes[alias], profiles[alias]
             resolved = sorted({str(r["resolved_model"]) for r in rows if r.get("resolved_model")})
@@ -901,6 +959,14 @@ def summarize(records, cases, cfg, availability=None, current_prices=None, repea
                 "delta_vs_baseline": None, "delta_ci_low": None, "delta_ci_high": None,
                 **risk_metrics(rows, task, kind, policy),
             }
+            if any("critical_error_choices" in c for c in cohort):
+                from decision_analysis import RISK_VERSION
+                statistic['risk_policy']=RISK_VERSION
+                statistic['risk_policy_status']='proposed_not_business_approved'
+                statistic["critical_cases"] = statistic["risk_exposures"]
+                statistic["critical_failures"] = statistic["unsafe_decisions"]
+            from decision_analysis import enrich_summary
+            enrich_summary(statistic, rows, cohort, cfg, profile)
             results.append(statistic)
     by_cohort = {(r["model"], r["dataset"], r["task"]): r for r in results}
     for result in results:
@@ -964,7 +1030,7 @@ def recommendation(row, baseline, policy):
         return "Estimate local hosting cost"
     return "Candidate for a controlled pilot"
 
-def fallback_replay(records, summaries, dataset, task, baseline, labels):
+def fallback_replay(records, summaries, dataset, task, baseline, labels, acceptance_policy=None):
     complete = {r["model"]: r for r in summaries if r["dataset"] == dataset and r["task"] == task and r["status"] == "complete"}
     grouped = defaultdict(dict)
     for row in records:
@@ -982,9 +1048,13 @@ def fallback_replay(records, summaries, dataset, task, baseline, labels):
         correct, critical_errors, used, costs, times = 0, 0, 0, [], []
         for case_id, fast in predictions.items():
             fallback = bool(fast.get("api_error")) or not fast["valid"] or (fast["type"] == "choice" and fast["decision"] in labels)
+            if acceptance_policy is not None:
+                from decision_analysis import acceptance
+                fallback = fallback or acceptance(fast, acceptance_policy) != "accepted"
             final = reference[case_id] if fallback else fast
             correct += int(final["correct"])
-            critical_errors += int(final.get("critical", False) and not final["correct"])
+            from decision_analysis import directional
+            critical_errors += int(directional(final) if "critical_error_choices" in final else final.get("critical", False) and not final["correct"])
             used += int(fallback)
             first, second = fast["_api_cost"], reference[case_id]["_api_cost"] if fallback else 0.0
             if first is not None and second is not None:
@@ -994,7 +1064,7 @@ def fallback_replay(records, summaries, dataset, task, baseline, labels):
                 times.append(a+b)
         n = len(predictions)
         result.append({"model": alias, "cases": n, "success_rate": correct/n, "fallback_rate": used/n,
-                       "critical_errors": critical_errors, "api_per_1k": statistics.mean(costs)*1000 if costs else None,
+                       "critical_errors": critical_errors, "api_per_1k": statistics.mean(costs)*1000 if len(costs) == n else None,
                        "cost_coverage": len(costs)/n, "currency": complete[alias]["currency"],
                        "simulated_p95_ms": percentile(times,.95)*1000 if len(times) == n else None})
     return result
@@ -1185,6 +1255,13 @@ def _run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outp
     root = Path(output_root or BASE/"results")
     folder = root / (datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S") + "_" + os.urandom(3).hex())
     folder.mkdir(parents=True)
+    # Persist the plan and credential-free inputs before the first request.
+    # Final snapshots also capture resolved serving/pricing metadata after the run.
+    write_json(folder/"config.initial.json",scrub_config(cfg))
+    (folder/"data.snapshot.jsonl").write_bytes(jsonl_bytes(cases))
+    write_json(folder/"run.plan.json",{"protocol":protocol,"request_plan":plan,
+                                     "batches":batches,"stability_sample_ids":repeat_ids,
+                                     "request_serialization":"preserve_order"})
     availability, records, consecutive, issued = {}, [], defaultdict(int), 0
     started, interrupted, error = utc(), False, None
     def notify(message=None, row=None):

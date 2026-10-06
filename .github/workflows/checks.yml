@@ -20,7 +20,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: python -m pip install -r requirements.txt
-      - run: python -m py_compile benchmark.py bench_ui.py report_export.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
+      - run: python -m py_compile benchmark.py bench_ui.py report_export.py report_server.py decision_analysis.py decision_ui.py shve.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
       - run: node --check report_assets/logic.js
       - run: node --check report_assets/report.js
       - run: python -m unittest discover -s tests -v

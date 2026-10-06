@@ -200,6 +200,8 @@ def result_view(report,cfg):
         protocol_block(report,errors,warnings,[],[])
         st.error("Saved evidence checks failed. Comparative results are withheld; inspect Cases or load an unchanged run.")
         return
+    import decision_ui
+    decision_ui.controls(analysis_cfg,report)
     summaries,records,profiles,quotes,stability,robustness = bench.summarize(
         report["records"],report["cases"],analysis_cfg,report["availability"],override,
         report["manifest"].get("stability_sample_ids"))
@@ -219,12 +221,22 @@ def result_view(report,cfg):
             "Dataset":r["dataset"],"Use case":r["task"],
             "Model":f"{r['display_name']} · {r['requested_model']} · effort={r['effort']}",
             "Status":r["status"],"Success %":100*r["success_rate"] if r["success_rate"] is not None else None,
+            "Evaluation scope":r['evaluation_scope'],"Deployment eligibility":r['deployment_eligibility'],
+            "Missing decision targets":r['outstanding_targets'],
+            "Blocked business decisions":r['blocked_business_decisions'],
+            "Non-review-label coverage %":100*r['label_based_coverage'] if r['label_based_coverage'] is not None else None,
+            "Threshold-qualified coverage %":100*r['threshold_coverage'] if r['threshold_coverage'] is not None else None,
+            "Business-policy-eligible coverage %":100*r['business_eligible_coverage'] if r['business_eligible_coverage'] is not None else None,
             "Gap vs reference pp":delta,"Gap 95% interval pp":interval,
             "p95 ms":r["p95_ms"],"API / 1k":r["api_per_1k"],"Currency":r["currency"],
             "Cost coverage %":100*r["cost_coverage"] if r["cost_coverage"] is not None else None,
             "Critical failures":f"{r['critical_failures']}/{r['critical_cases']}",
             "Unsafe decisions":f"{r['unsafe_decisions']}/{r['risk_exposures']}",
             "Cases / families":f"{r['attempted']}/{r['families']}",
+            "Scenario net hours saved":r['workflow_scenario']['net_hours_saved'],
+            "Scenario review hours":r['workflow_scenario']['review_hours'],
+            "Scenario total / 1k":r['workflow_scenario']['total_per_1k'],
+            "Scenario currency":r['workflow_scenario']['currency'],
             "Next step":r["recommendation"],
         })
     st.subheader("Business decision matrix")
@@ -244,7 +256,7 @@ def result_view(report,cfg):
         st.dataframe(df[["model","planned","attempted","families","success_rate","success_ci_low","success_ci_high",
                          "ci_method","macro_f1","brier","mae","valid_rate","api_errors","invalid_answers",
                          "none_precision","none_recall","non_none_on_none_rate","unsafe_decisions",
-                         "risk_exposures","unsafe_upper95","risk_direction","auto_coverage","auto_accuracy"]],width="stretch")
+                         "risk_exposures","unsafe_upper95","risk_direction","auto_coverage","auto_accuracy"]].rename(columns={"auto_coverage":"Label-based automation coverage","auto_accuracy":"Label-based accepted accuracy"}),width="stretch")
         if not complete.empty:
             fig = px.bar(complete,x="model",y="success_rate",hover_data=["requested_model","effort","attempted","families"],
                          color="model",color_discrete_map=MODEL_COLORS,
@@ -297,7 +309,13 @@ def result_view(report,cfg):
                           and r["task"]==cohort[1] and r["type"]=="choice" and r["valid"]})
         labels = st.multiselect("Also fall back on these explicit choice labels",choices,
                                default=[x for x in choices if x in {"NONE","CLARIFY","ESCALATE"}])
-        replay = bench.fallback_replay(records,summaries,*cohort,baseline,set(labels))
+        use_acceptance=st.checkbox("Also fall back when the selected acceptance policy defers",value=False)
+        if use_acceptance:
+            replay=[]
+            for r in scoped:
+                replay += [x for x in bench.fallback_replay(records,summaries,*cohort,baseline,set(labels),r["acceptance_policy"]) if x["model"]==r["model"]]
+        else:
+            replay = bench.fallback_replay(records,summaries,*cohort,baseline,set(labels))
         st.dataframe(pd.DataFrame(replay),width="stretch")
         st.caption("Offline replay: invalid/API-failed decisions always fall back. Only complete, matched, same-currency cohorts qualify. Latencies add serially. No inference calls are made.")
     with tabs[4]:
@@ -322,6 +340,7 @@ def result_view(report,cfg):
                             labels={"x":"Predicted label","y":"Expected label","color":"Cases"},
                             title=table["model"]+" · "+cohort[0]+" / "+cohort[1],template="plotly_white")
             st.plotly_chart(fig,width="stretch",theme=None)
+    decision_ui.render(scoped,records,report["cases"],analysis_cfg,report)
     st.download_button("Download business CSV",bench.csv_bytes(visible),"business_report.csv",mime="text/csv")
     st.caption("The complete HTML includes every dataset, use case, result tab and saved case, regardless of the filters above. Recipients can explore it offline; it contains case inputs and responses, but no API-key settings.")
     st.download_button("Download complete HTML report",
@@ -408,6 +427,10 @@ def model_editor(model,revision,busy):
         deployment = model.get("deployment","hosted")
         model["deployment"] = st.selectbox("Deployment / billing",deploys,index=deploys.index(deployment) if deployment in deploys else 1,
                                            key=key("deployment"),disabled=busy)
+        eligibility=["unknown","approved","not approved"]
+        model["deployment_eligibility"]=st.selectbox("Organisation-declared deployment eligibility",eligibility,
+            index=eligibility.index(model.get("deployment_eligibility","unknown")),key=key("eligibility"),disabled=busy)
+        st.caption("Supplied by your organisation; model quality and hosted/local location do not grant approval.")
         params_text = st.text_area("Additional API parameters (JSON)",json.dumps(model.get("params",{}),indent=2),
                                   key=key("params"),disabled=busy,height=100)
         try:

@@ -140,7 +140,7 @@ answers, local checks, prompt sensitivity, and limits of the community MLX port.
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 -m py_compile benchmark.py bench_ui.py report_export.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
+python3 -m py_compile benchmark.py bench_ui.py report_export.py report_server.py decision_analysis.py decision_ui.py shve.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py
 ```
 
 Use `.venv/bin/python` on macOS/Linux or `.venv\Scripts\python.exe` on Windows after
@@ -166,3 +166,12 @@ Defaults: **2 warm-up calls/model**, **10 balanced batches** with related cases 
 | Economics | API cost/1,000 decisions, cost/correct decision, cost coverage; separate hosting scenarios |
 
 API failures and invalid answers count against task success. Read Brier/MAE alongside validity coverage. Costs use recorded token usage; missing paid usage remains unknown. Use a **reviewed domain holdout** separate from development data: synthetic fixtures establish screening results, not production performance. Intervals are unadjusted for multiple comparisons; confirm model selection on a fresh holdout.
+
+## SHVE decision workflows
+
+See [SHVE_GUIDE.md](SHVE_GUIDE.md) for package validation, the four-model protocol,
+input-only deterministic baselines, directional risk scoring, acceptance thresholds,
+workflow cost assumptions and offline report regeneration. New **Acceptance and risk**,
+**Workflow economics**, **Dataset diagnostics** and **Deterministic baselines** report
+sections use saved responses without additional inference. Historical label-based
+coverage, frozen evidence and existing report formats remain supported.

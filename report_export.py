@@ -36,7 +36,44 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
     manifest["analysis_business_targets"] = cfg.get("business", {})
     manifest["price_basis"] = price_basis
     manifest["analysis_quotes"] = public_quotes
+    manifest["original_run_costs"] = report["manifest"].get("analysis_costs", [])
     manifest["analysis_costs"] = b.cost_totals(records, quotes)
+    from decision_analysis import diagnostics, risk_curve, policy_for, baseline_comparisons, cascade_curves
+    decision = {"diagnostics": diagnostics(report["cases"], records), "risk_curves": [],
+                "workflow_cost": cfg.get("workflow_cost", {}), "acceptance": cfg.get("acceptance", {}),
+                "tasks": cfg.get("tasks", {}), "frozen_acceptance": cfg.get("frozen_acceptance", {})}
+    for summary in summaries:
+        cohort_rows = [r for r in records if b.primary_row(r) and
+                       (r["model"], r["dataset"], r["task"]) == (summary["model"], summary["dataset"], summary["task"])]
+        curves=risk_curve(cohort_rows,policy_for(cfg,summary['task'],summary['model']),summary['planned'])
+        decision['risk_curves'] += [{'model':summary['model'],'dataset':summary['dataset'],'task':summary['task'],**curve}
+                                   for curve in cascade_curves(curves,records,summaries,summary,baseline)]
+    study_design = None
+    if cfg.get("shve_protocol"):
+        study_design = {
+            "split_counts": {role: sum(c.get("split") == role for c in report["cases"])
+                             for role in ("development", "evaluation")},
+            "development_purpose": "Choose and freeze rules and probability thresholds; excluded from evaluation scores.",
+            "evaluation_purpose": "Measure the frozen approach on separate cases; both splits belong to one SHVE dataset.",
+            "downstream_requirements": {
+                "routing_quality": "Execute configured specialist models and compare their outputs against quality labels on the same requests.",
+                "workflow_savings": "Measure manual, review, audit and rework time, hosting and specialist costs. Editable cost scenarios are estimates, not measured savings.",
+                "churn_uplift": "Longitudinal features and observed churn outcomes, with customer/time-separated train and test data, to compare predictive pipelines before and after data preparation."},
+            "additional_evidence": "This benchmark measures accuracy against explicit supplied rules; defining test rules does not require operational business approval. Operational adoption separately requires validated labels, source-entity lineage and approval for the actions taken. Changed rules should be tested as a new policy version, preserving the earlier results."}
+        from shve import baseline_records, BASELINE_VERSION
+        baseline_rows = baseline_records(report["cases"], cfg)
+        rule_cfg = copy.deepcopy(cfg)
+        rule_cfg["models"] = [{"name":"rules", "display_name":"Deterministic rules", "enabled":True,
+                               "api":"rules", "model":BASELINE_VERSION, "endpoint":"", "deployment":"local"}]
+        decision["baseline_records"] = baseline_rows
+        decision["baseline_summaries"] = b.summarize(baseline_rows, report["cases"], rule_cfg, bootstrap=300)[0]
+        decision["baseline_comparisons"] = baseline_comparisons(summaries,records,decision["baseline_summaries"],baseline_rows)
+        decision["baseline_basis"] = "Input-only deterministic rules; development vocabulary frozen before evaluation. Latency is local function time, not comparable HTTP latency. No paid API cost; hardware cost unknown."
+        warnings_shve = ["Source-grounded scenarios measure compliance with explicit supplied policies. Gold is AI-reviewed; operational generalisation has not been validated.",
+                         "160 evaluation cases / 80 declared families per task; repeated templates and unverified source-entity independence limit generalisation.",
+                         "Threshold selection uses development responses only and is provisional. Entity MATCH is a classification output, not an automatic merge.",
+                         "Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
+        manifest.setdefault("analysis_warnings", []).extend(warnings_shve)
     # Investigation notes remain in the audit artifacts, not in shared reports.
     warnings = list(dict.fromkeys(w for w in manifest.get("analysis_warnings", [])
                                   if not w.startswith(("Option-order robustness is unavailable", "CLM diagnostic:"))))
@@ -48,8 +85,10 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
             "stability": stability, "robustness": robustness,
             "confusion": b.confusion_tables(records), "cases": report["cases"],
             "records": [{k: v for k, v in r.items() if k != "profile"} for r in records],
-            "business": cfg.get("business", {}), "colors": MODEL_COLORS,
-            "metric_guide": METRIC_GUIDE, "protocol": PROTOCOL_TEXT}
+            "business": cfg.get("business", {}), "colors": {k:v for k,v in MODEL_COLORS.items() if k in profiles},
+            "study_design": study_design,
+            "decision_analysis": decision, "metric_guide": METRIC_GUIDE, "protocol": PROTOCOL_TEXT if "clm" in profiles else PROTOCOL_TEXT.replace(
+                "CLM embedding caches affect timings; record server cache/context settings.\n", "") }
 
 
 def render_report(payload):
@@ -125,7 +164,17 @@ real holdout labels and declared business targets. It does not certify safety.
 Synthetic cases and AI draft labels are screening evidence.
 """
 
-METRIC_GUIDE = [('Task success',
+METRIC_GUIDE = [('Label-based automation coverage',
+  'Historical auto_coverage counts valid Choice decisions outside configured safe labels; no confidence threshold. New non-review-label coverage also respects task review labels such as HUMAN_REVIEW.'),
+ ('Threshold-qualified coverage',
+  'Accepted / all planned primary cases under explicitly chosen probability or vendor-confidence thresholds. Missing scores defer to review; Score automation is unsupported. Accepted accuracy uses accepted cases only; show failures and coverage alongside it.'),
+ ('Business-policy-eligible coverage',
+  'Threshold/label acceptance plus organisation-approved task eligibility. Deployment approval is separate. AI-reviewed fixtures cannot certify live automation; entity MATCH cannot trigger automatic merging.'),
+ ('Workflow cost scenario',
+  'Manual baseline minus review, audit of accepted cases, and estimated rework. Labour, volume, hosting and FX are assumptions; error extrapolations use the evaluated cohort, not true operational prevalence. Released capacity is not guaranteed cash savings.'),
+ ('Directional critical risk',
+  'For directional-choice-v1, a valid predicted label in the case critical_error_choices is an error; exposure is a case with a nonempty risk list. Failures remain reliability failures. No exposure is unavailable, not safe. Legacy cases retain historical scoring.'),
+ ('Task success',
   'Correct / all planned cases; errors and invalid answers count as failures. Use for the '
   'production outcome, only compare complete cohorts.'),
  ('95% interval',

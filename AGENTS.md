@@ -51,6 +51,15 @@ all datasets, cases and response evidence. Protocol text and the metric guide ar
 shared with Streamlit. Reference comparisons use Python's existing summaries;
 browser fallback replay in logic.js must match benchmark.fallback_replay (Node parity
 tests run when Node is available). Never fetch CDNs or call model APIs from exports.
+The viewer offers a complete HTML download, clearing generated DOM before saving so
+reopening does not duplicate controls. SHVE defaults to evaluation; development and
+evaluation are partitions of one dataset, never pooled into a claimed holdout score.
+`report_server.py` serves one saved viewer and allowlisted HTTP attachments on
+127.0.0.1 for in-app browsers that cannot save Blob URLs. It never exposes config
+files or runs inference. Offline files retain standard-browser download support.
+Do not change Python analysis APIs during a running benchmark: loaded modules can
+conflict with lazily imported exporters. Export failures must be recovered in a fresh
+process from saved responses, without repeating completed hosted calls.
 Escape embedded JSON against script termination and render dataset text with
 textContent. Do not include connection credentials or custom request headers.
 Export all cohorts regardless of current dashboard filters. Prices/business targets
@@ -62,7 +71,7 @@ are captured settings; only volume/fallback scenarios recalculate in the browser
 - Standard setup/dashboard: `python3 start.py` (creates `.venv`, installs requirements).
 - This Mac: `.venv/bin/python local_models.py laya` (or `nimble`, `clm`).
 - Tests: `.venv/bin/python -m unittest discover -s tests -v`.
-- Syntax: `.venv/bin/python -m py_compile benchmark.py bench_ui.py report_export.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py`.
+- Syntax: `.venv/bin/python -m py_compile benchmark.py bench_ui.py report_export.py report_server.py decision_analysis.py decision_ui.py shve.py starter_data.py data_prompt.py start.py local_models.py local_runtime.py local_clm_server.py`.
 - Browser script syntax: `node --check report_assets/logic.js` and `node --check report_assets/report.js`.
 - Launcher syntax: `zsh -n 'Start Local.command'`.
 - No separate build, linter, or typechecker is configured.
@@ -92,3 +101,24 @@ are captured settings; only volume/fallback scenarios recalculate in the browser
 - Synthetic fixtures and a three-case smoke test do not prove real-world quality.
 - Keep changes focused. Update tests for behavior changes and these notes when the
   architecture, startup workflow, configuration, or serving assumptions change.
+
+## SHVE extension (October 2026)
+
+`decision_analysis.py` owns pure acceptance/risk/economics/diagnostics calculations;
+`decision_ui.py` supplies Streamlit controls. `report_assets/logic.js` mirrors acceptance,
+economics and cascade logic; test parity before changing formulas. `shve.py` validates
+handoff archives, runs input-only rule baselines and an explicit four-model SHVE protocol.
+See `SHVE_GUIDE.md`. Data/results remain ignored. Do not use evaluation responses to tune
+thresholds or baselines; frozen threshold analysis is separate from raw evidence.
+Directional risk is opt-in via case `critical_error_choices`; legacy scoring stays intact.
+Organisation approval, scenario eligibility, and model quality are distinct. No Score
+threshold automation; missing probabilities defer. Fully unknown costs cannot imply savings.
+SHVE `HUMAN_REVIEW` is excluded from all label-coverage measures; legacy safe-label
+defaults remain unchanged. Frozen `accept_none` affects threshold acceptance only,
+never semantic review labels or review recall. Rule comparisons require complete,
+matched primary cohorts and use the existing paired-family intervals.
+The runner saves initial inputs/configuration and batch/repeat plans before inference.
+Analysis exports verify that raw/config/data/manifest fingerprints remain unchanged.
+Include `decision_analysis.py decision_ui.py shve.py` in Python syntax validation.
+SHVE is 1,402 calls per selected model (four-model total 5,608); explicit recovery
+may select incomplete models only and must retain the original protocol/inputs.
