@@ -238,3 +238,28 @@ it is not evidence that Jev's NONE is necessarily wrong or that C should be rela
 This old synthetic screening cohort is separate from SHVE. No future fixture is
 silently substituted into old evidence. Ineffective historical option-order pairs
 remain excluded; absence of an effective pair is not a passed robustness test.
+
+## Corrected sector-label audit
+
+The initial improved `label_qa` prompts omitted the sector-code dictionary. Their
+scores do not establish model quality on a fully specified label-audit task.
+The corrected question supplies all ten code meanings; evidence, gold, splits,
+batch assignments and repeat IDs remain unchanged. No answer-specific hint is added.
+
+Run the explicitly authorised correction with
+`.venv/bin/python shve_labelqa.py SOURCE --execute`. The original complete report
+remains intact. With its fourteen label-QA repeat cases, the correction issues
+90 requests per model: 60 primary, 28 repeat and two warm-ups. It calls no other
+category. Use `--resume PARTIAL_CORRECTION --execute` to continue missing slots
+without retrying recorded attempts, or `--corrected COMPLETE_CORRECTION` to export
+the full revised report without inference. Local models run sequentially using
+their existing installations; hosted calls use the same configured endpoints.
+
+The revised report explicitly supersedes the affected category and retains other
+answers. It includes both sessions' warm-ups, so the original 6,248 selected
+requests become 6,256, while the correction itself issued 360 additional requests.
+Discarded earlier label-QA attempts remain in their original source report and
+are excluded from revised scores and costs. Correction provenance and source
+fingerprints are saved in `category_revision.json`; the manifest records the
+exact warm-up case schedule. This correction uses already inspected authored
+cases and is a rerun, not a new independent holdout.

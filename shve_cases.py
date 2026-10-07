@@ -39,7 +39,8 @@ SECTOR_POLICY = (
 )
 POLICIES = {
     'sector_imputation': SECTOR_POLICY + ' Choose the sector.',
-    'label_qa': SECTOR_POLICY + (
+    'label_qa': SECTOR_POLICY + ' Sector-code dictionary: ' + ''.join(
+        code + ' = ' + meaning + '; ' for code, meaning in SECTORS.items()) + (
         ' Audit the assigned sector: KEEP if it matches the supported activity; '
         'CORRECT if evidence identifies a different sector unambiguously; CLARIFY '
         'if evidence cannot establish a sector. A syntactically valid label is '

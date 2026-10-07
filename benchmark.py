@@ -1422,7 +1422,7 @@ def confusion_tables(records):
 def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batches,
                 protocol, plan, models, started, interrupted=False, error=None,
                 issued=None, connection_test=False, execution_order="interleaved", sources=None,
-                request_serialization="preserve_order"):
+                request_serialization="preserve_order", warmup_case_ids=None):
     folder = Path(folder)
     issued = len(records) if issued is None else issued
     # Rewrite once so connection-check phase corrections are persisted.
@@ -1458,7 +1458,8 @@ def save_report(folder, records, cases, cfg, availability, *, repeat_ids, batche
         "execution_order":execution_order,"sources":sources or [],
         "request_serialization":request_serialization,"analysis_warnings":input_warnings(cases),
         "primary_cases":0 if connection_test else len(cases),"families":len({c["cluster_id"] for c in cases}),
-        "stability_sample_ids":repeat_ids,"issued_requests":issued,"recorded_requests":len(records),
+        "stability_sample_ids":repeat_ids,"warmup_case_ids":warmup_case_ids,
+        "issued_requests":issued,"recorded_requests":len(records),
         "interrupted":interrupted,"error":error,"dataset_sha256":fingerprint(cases),
         "config_sha256":fingerprint(scrub_config(cfg)),
         "profiles":profiles,"quotes":{k:{**scrub_config({"models":[v]})["models"][0]} for k,v in quotes.items()},
@@ -1482,6 +1483,7 @@ def combine_reports(selections, output_root=None):
     cases, cfg = copy.deepcopy(first["cases"]), copy.deepcopy(first["config"])
     protocol = first["manifest"]["protocol"]
     repeated = first["manifest"]["stability_sample_ids"]
+    warmup_case_ids = first['manifest'].get('warmup_case_ids')
     case_ids = {c["id"] for c in cases}
     serialization = first["manifest"].get("request_serialization", "sorted_keys")
     serialize = input_json if serialization == "preserve_order" else canonical
@@ -1501,6 +1503,7 @@ def combine_reports(selections, output_root=None):
         if serialize(sorted(report["cases"], key=lambda c: c["id"])) != dataset:
             raise ValueError("Source datasets or frozen labels differ.")
         if (manifest["protocol"] != protocol or manifest["stability_sample_ids"] != repeated
+                or manifest.get('warmup_case_ids') != warmup_case_ids
                 or canonical({k:v for k,v in report["config"].items() if k != "models"}) != settings):
             raise ValueError("Source scoring settings, protocol or repeat samples differ.")
         for alias in aliases:
@@ -1541,10 +1544,14 @@ def combine_reports(selections, output_root=None):
     with run_lock(root):
         folder = root/(datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")+"_combined_"+os.urandom(3).hex())
         folder.mkdir(parents=True)
+        write_json(folder/'run.plan.json',{'protocol':protocol,'request_plan':request_plan(cases,cfg),
+                   'batches':batches,'stability_sample_ids':repeated,'request_serialization':serialization,
+                   'warmup_case_ids':warmup_case_ids})
         save_report(folder,records,cases,cfg,availability,repeat_ids=repeated,batches=batches,
                     protocol=protocol,plan=request_plan(cases,cfg),models=models,
                     started=min(r["manifest"]["started_utc"] for r,_ in reports),
-                    execution_order="model_by_model_combined",sources=sources,request_serialization=serialization)
+                    execution_order="model_by_model_combined",sources=sources,request_serialization=serialization,
+                    warmup_case_ids=warmup_case_ids)
     return {"folder":str(folder),"error":None,"interrupted":False}
 
 

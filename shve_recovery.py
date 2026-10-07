@@ -18,7 +18,12 @@ def remaining_calls(report, alias):
     cases = report['cases']
     by_id = {c['id']:c for c in cases}
     protocol = report['manifest']['protocol']
-    scheduled = [(cases[i%len(cases)],'warmup',1) for i in range(protocol['warmup_calls'])]
+    warmups = report['manifest'].get('warmup_case_ids')
+    if warmups is None:
+        warmups = [cases[i%len(cases)]['id'] for i in range(protocol['warmup_calls'])]
+    if len(warmups)!=protocol['warmup_calls'] or any(i not in by_id for i in warmups):
+        raise ValueError('Invalid saved warm-up schedule.')
+    scheduled = [(by_id[i],'warmup',1) for i in warmups]
     scheduled += [(c,'primary',1) for c in cases]
     scheduled += [(by_id[identifier],'repeat',repetition)
                   for repetition in range(2,protocol['repetitions']+1)

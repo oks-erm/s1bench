@@ -153,3 +153,13 @@ checks are counted as already issued slots, with source_phase retained. Approval
 declarations belong to request_plan.json provenance, not scoring configuration,
 so otherwise compatible local and hosted sources can combine. Add this module to
 syntax validation. Never retry an already present slot to improve scores.
+
+`shve_labelqa.py SOURCE --execute` corrects only the missing sector-code dictionary
+in the 60 label-audit cases, preserving original batches/repeat IDs and creating
+new evidence. `--resume RUN` continues missing slots only; partial aggregation
+retains completed providers through repeated interruptions. `--corrected RUN`
+creates the full revised report without inference. Earlier reports stay untouched.
+Revised reports record category supersession, correction code hashes and explicit
+`warmup_case_ids` for both sessions. Include this module in syntax checks. Older
+combined reports may lack `run.plan.json`; agreed frozen primary rows establish
+their batch assignments. Reject changed evidence, labels, model settings or protocol.

@@ -63,6 +63,23 @@ class SemanticCasesTests(unittest.TestCase):
             self.assertEqual(case['provenance']['kind'], 'authored_policy_fixture')
             self.assertNotIn(case['expected'], case['critical_error_choices'])
 
+    def test_label_audit_requests_explain_every_assigned_sector_code(self):
+        # Catch a request that gives the activity definitions but omits the
+        # numeric code meanings needed to audit the existing label.
+        meanings = {'Sector 1': 'Industry', 'Sector 2': 'Domestic',
+                    'Sector 3': 'Hospitality/Catering', 'Sector 4': 'Agriculture',
+                    'Sector 5': 'Government', 'Sector 6': 'Transport',
+                    'Sector 7': 'Aerosol', 'Sector 8': 'Other',
+                    'Sector 9': 'Partner / Reseller', 'Sector 10': 'Not applicable'}
+        for case in self.module().build_cases():
+            if case['task'] != 'label_qa':
+                continue
+            request = json.loads(benchmark.chat_messages(case)[1]['content'])
+            instructions = request['question']['instructions']
+            for code, meaning in meanings.items():
+                self.assertIn(code + ' = ' + meaning + ';', instructions)
+            self.assertEqual(set(request['question']['criteria']), {'KEEP', 'CORRECT', 'CLARIFY'})
+
     def test_input_only_baseline_has_real_counterexamples_in_every_category(self):
         mod = self.module()
         wrong = Counter()
