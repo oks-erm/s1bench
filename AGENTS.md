@@ -122,3 +122,32 @@ Analysis exports verify that raw/config/data/manifest fingerprints remain unchan
 Include `decision_analysis.py decision_ui.py shve.py` in Python syntax validation.
 SHVE is 1,402 calls per selected model (four-model total 5,608); explicit recovery
 may select incomplete models only and must retain the original protocol/inputs.
+
+`shve_improved.py` is a separate revised protocol, not a change to `shve.py`:
+`shve_cases.py` supplies 360 authored semantic cases in six categories (including
+`model_routing`); `churn_data.py` locally prepares 1,000 weighted source snapshots.
+The new plan is 1,562 calls/model / 6,248 total. Optional parquet preparation uses
+`requirements-data.txt`; inference/analysis remain standard library. Include these
+three modules and `churn_analysis.py` in syntax checks. Default source data/results
+are ignored, and hosted transfer of source features requires explicit approval.
+No IDs, outcome values, future contract flags, weights or label reasons may enter
+requests. Null monthly support counts mean no events under the confirmed complete
+extract; sentiment/ratios remain NA. Unit conversions cannot be guessed.
+`churn_analysis.py` owns N/n-weighted probability metrics and calibration-only
+experimental threshold selection. Keep fixed 0.5 classification separate from it;
+never claim unweighted oversampled churn accuracy as operational performance.
+Observed stochastic binary labels require explicit task `label_semantics:
+observed_outcome`; default deterministic duplicate/gold guards remain active.
+Source as-of joins and generating outcome SQL are unverified; results describe
+retrospective supplied-label discrimination, not certified forecasting or uplift.
+Lexical controls are deliberately limited; neural advantage over them is not proof
+of advantage over all code. Strict GPT schema is opt-in on Responses endpoints.
+Improved exports retain every existing report tab, metric, colour and download.
+Complete model recovery is rejected. Audit saved evidence before analysis and never
+edit lazy-imported analysis APIs during an active run.
+`shve_recovery.py` resumes only missing warm-up/primary/repeat slots; it preserves
+prior attempts and source fingerprints. Failed warm-ups relabelled connection
+checks are counted as already issued slots, with source_phase retained. Approval
+declarations belong to request_plan.json provenance, not scoring configuration,
+so otherwise compatible local and hosted sources can combine. Add this module to
+syntax validation. Never retry an already present slot to improve scores.

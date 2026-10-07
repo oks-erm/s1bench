@@ -1,4 +1,93 @@
-# SHVE scenario benchmark
+# SHVE benchmarks
+
+## Improved contextual and churn run
+
+Use `shve_improved.py` for the revised experiment; `shve.py` below preserves the
+earlier handoff experiment. The improved suite has the same six use-case categories,
+with **model_routing** replacing the old routing name, and a separate
+**churn_prediction** category. Routing evaluates selection of declared typed,
+weak-GPT and strong-GPT roles; it does not execute those specialists.
+
+The six categories each contain 30 distinct authored premises with two equivalent
+evidence representations: 12 calibration cases / six families, and 48 evaluation
+cases / 24 families. Cases require interpretation of scope, negation, temporal
+authority, conflicting records and evidence sufficiency. A frozen lexical control
+is supplied; beating it does not demonstrate an advantage over all possible code.
+Its labels are experimental policy judgments, not independently human-reviewed
+operational truth. The older rule-compliance results remain available unchanged.
+
+Churn uses 1,000 samples from the supplied anonymous monthly parquet and unchanged
+`ChurnNextMonth` values: 200 calibration cases in January/February 2026 and 800
+evaluation cases in April–July 2026. A historical prior ends in November 2025;
+December and March separate the partitions. August/September are excluded because
+outcome observation near the source cutoff is questionable. Source IDs, outcome
+values and future closure flags are omitted from model inputs. Null monthly
+support counts become zero under the user's confirmed complete-extract convention;
+sentiment and event ratios remain not applicable. No units are guessed from magnitude.
+
+Prepare locally (no model calls or data transfer):
+
+```sh
+.venv/bin/python -m pip install -r requirements-data.txt
+.venv/bin/python shve_improved.py --prepare --churn-source /path/to/flat_anon_20260910.parquet
+```
+
+Prepared data live under ignored `data/shve-improved-20261007`. Their hashes, source hash,
+sampling counts, feature allowlist and assumptions are frozen in `manifest.json`.
+Preparation refuses to overwrite different evidence. Omit `--churn-source` to reuse
+an already prepared churn sample. The source files are not distributed in Git.
+
+Run the configured Jev/GPT/Nimble/Laya profiles after approval for these particular
+anonymous source features, with keys saved locally or available via environment:
+
+```sh
+.venv/bin/python shve_improved.py --execute --egress-approved
+```
+
+The plan is **1,360 primary cases + 200 repeat calls + two warm-ups per model**:
+**1,562 requests/model, 6,248 across four models**, with no automatic retries.
+CLM and CLEF are excluded. Local checkpoints run sequentially offline. `--only nimble
+laya` can run a local subset without hosted transfer. To recover an incomplete
+model, add `--recover-from results/RUN_ID --only MODEL`; completed models are rejected.
+Recovery preserves prior attempts and issues only missing protocol slots, including
+unfinished repeats; it never retries a recorded error to improve scores. Hosted
+transfer declarations are recorded in run provenance, so separately executed local
+and hosted components retain compatible scoring configurations.
+Combine compatible complete sources with `benchmark.combine_reports`, preserving
+every partial source. Do not rerun paid models to regenerate an export.
+
+```sh
+.venv/bin/python shve_improved.py --report results/RUN_ID
+.venv/bin/python report_server.py results/RUN_ID --port 8767
+```
+
+One self-contained HTML includes all report tabs, colours, confusion matrices,
+latency, costs, fallback, repeat/robustness checks and saved evidence. The HTTP
+server enables actual HTML/CSV/JSON attachment downloads in the in-app browser.
+The complete HTML always includes both partitions and all use cases.
+
+For churn, population metrics restore month/outcome sampling weights `N/n`:
+ROC-AUC, average precision, Brier, log loss, precision and recall are shown alongside
+response coverage. The ordinary classification/F1/accuracy tables are explicitly
+**oversampled sample diagnostics**, not population estimates. Primary threshold 0.5
+is fixed before inference. A supplementary threshold maximises weighted calibration
+F1 only; evaluation never selects it. It is experimental and has no business approval.
+The historical constant probability is a reference, not a fitted tabular predictor.
+The inherited choice automation gate requires ten accepted calibration families;
+this pilot supplies six per core task, so threshold-qualified automation is
+withheld by design. Ordinary task success and non-review-label coverage remain
+available; this is insufficient calibration evidence, not model inference failure.
+Missing/invalid predictions lower planned positive recall rather than disappearing.
+Intervals are withheld if customer overlap across sampling strata would invalidate
+the available bootstrap. Generated outcome SQL and as-of feature joins were not
+supplied: this is retrospective supplied-label discrimination conditional on snapshot
+availability, not independently verified prospective forecasting or retention uplift.
+
+`churn_prediction.analysis.json`, per-label/error-direction CSVs, risk curves,
+baseline evidence and `analysis_provenance.json` accompany the HTML. Analysis checks
+that raw responses, data, configuration and manifest hashes remain unchanged.
+
+## Earlier handoff scenario benchmark
 
 This extends the existing model benchmark with six source-grounded scenario tasks.
 Underlying records are pseudonymised; activities, corruptions, comparisons and policies

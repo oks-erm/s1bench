@@ -194,6 +194,9 @@ def validate_data(cases, cfg):
         if not isinstance(q.get("instructions"), (str, dict, list)):
             raise ValueError(f"Case {label}: question instructions are required.")
         kind, gold, criteria = q["type"], case.get("expected"), q.get("criteria")
+        observed = task_settings(case,cfg).get('label_semantics') == 'observed_outcome'
+        if observed and kind != 'noul':
+            raise ValueError(f'Case {label}: observed outcomes require a binary probability question.')
         if case["task"] in kinds and kinds[case["task"]] != kind:
             raise ValueError("One task ID cannot mix question types: " + case["task"])
         kinds[case["task"]] = kind
@@ -224,11 +227,11 @@ def validate_data(cases, cfg):
                 raise ValueError(f"Case {label}: invalid directional risk labels.")
         canonical(case)
         content = fingerprint([case["task"], state_for(case), q])
-        if content in content_gold and canonical(gold) != content_gold[content]:
+        if not observed and content in content_gold and canonical(gold) != content_gold[content]:
             raise ValueError(f"Case {label}: identical inputs have contradictory gold labels.")
         content_gold[content] = canonical(gold)
         family = str(case.get("cluster_id") or case.get("conversation_id") or content)
-        if content in same_content_families and same_content_families[content] != family:
+        if not observed and content in same_content_families and same_content_families[content] != family:
             raise ValueError("Identical inputs were assigned to independent families. Group duplicates with one cluster_id.")
         same_content_families[content] = family
         case["cluster_id"] = family
@@ -236,7 +239,7 @@ def validate_data(cases, cfg):
         if case["task"] not in cfg["tasks"]:
             cfg["tasks"][case["task"]] = {"question": copy.deepcopy(q)}
     if len(content_gold) < len(cases):
-        warnings.append("Exact repeated inputs exist; their family grouping must be respected.")
+        warnings.append("Exact repeated inputs exist; policy duplicates share a family and observed outcomes retain source-customer grouping.")
     return warnings
 
 def grade(value, case, cfg):
@@ -424,6 +427,10 @@ def captured_profile(model):
             "encoder_id": model.get("encoder_id"), "encoder_revision": model.get("encoder_revision"),
             "serving_notes": model.get("serving_notes"), "notes": model.get("notes"),
             "deployment_eligibility": model.get("deployment_eligibility", "unknown"),
+            "response_contract": "strict JSON schema per typed question" if (
+                model.get('structured_output') and model['api']=='openai' and
+                urllib.parse.urlsplit(model['endpoint']).path.rstrip('/').endswith('/responses'))
+                else "native typed answer" if model['api']=='systemone' else "prompt-only JSON; validated after response",
             "identity_evidence": model.get("identity_evidence", {"status": "unavailable"}),
             "effective_settings": {"explicit": params, "unspecified": "provider-default; effective values unknown"}}
 
@@ -480,6 +487,13 @@ def call_model(model, case, cfg):
     elif responses:
         body = {**params, "model": model["model"], "instructions": messages[0]["content"],
                 "input": messages[1]["content"], "stream": False}
+        if model.get('structured_output'):
+            question=case['question']
+            value_schema=({'type':'string','enum':list(question['criteria'])}
+                          if question['type']=='choice' else {'type':'number'})
+            body['text']={**body.get('text',{}),'format':{'type':'json_schema','name':'typed_decision',
+                'strict':True,'schema':{'type':'object','properties':{'value':value_schema},
+                                       'required':['value'],'additionalProperties':False}}}
     else:
         body = {**params, "model": model["model"], "messages": messages, "stream": False}
     headers = {"Content-Type": "application/json", "Accept": "application/json"}

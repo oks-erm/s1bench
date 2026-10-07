@@ -49,6 +49,9 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
         decision['risk_curves'] += [{'model':summary['model'],'dataset':summary['dataset'],'task':summary['task'],**curve}
                                    for curve in cascade_curves(curves,records,summaries,summary,baseline)]
     study_design = None
+    improved = cfg.get('shve_protocol', {}).get('suite') == 'improved'
+    default_dataset = ('shve_improved_evaluation' if improved else
+                       'shve_v2_evaluation' if cfg.get('shve_protocol') else '')
     if cfg.get("shve_protocol"):
         study_design = {
             "split_counts": {role: sum(c.get("split") == role for c in report["cases"])
@@ -61,15 +64,40 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
                 "workflow_savings": "Measure manual, review, audit and rework time, hosting and specialist costs. Editable cost scenarios are estimates, not measured savings.",
                 "churn_uplift": "A separate labelled monthly dataset can measure prediction quality against its supplied churn outcomes. Measuring retention uplift additionally requires an intervention/control trial; prediction accuracy alone does not establish uplift."},
             "additional_evidence": "This benchmark measures accuracy against explicit supplied rules; defining test rules does not require operational business approval. Operational adoption separately requires validated labels, source-entity lineage and approval for the actions taken. Changed rules should be tested as a new policy version, preserving the earlier results."}
-        from shve import baseline_records, BASELINE_VERSION
+        if improved:
+            from shve_improved import baseline_records, BASELINE_VERSION, churn_summaries
+            study_design.update(
+                prediction_scope=cfg['shve_protocol'].get('prediction_scope'),
+                churn_protocol=cfg['shve_protocol'].get('churn_protocol'),
+                threshold_rule=cfg['shve_protocol'].get('threshold_rule'),
+                additional_evidence='Authored semantic cases test the declared experimental policies. Monthly churn cases test supplied observed outcomes with sampling weights, conditional on feature availability. These results do not independently verify prospective forecasting, retention uplift, operational safety or business approval.')
+            decision['churn_prediction'] = churn_summaries(records, report['cases'], cfg)
+            churn_index = {(entry['model'], entry['dataset'], entry['task']): entry
+                           for entry in decision['churn_prediction']}
+            # Supplied analysis can be reused by the caller; annotations belong to
+            # the export only and must not mutate the original summary evidence.
+            by_reference = copy.deepcopy(by_reference)
+            summaries = by_reference[baseline]
+            for reference_summaries in by_reference.values():
+                for summary in reference_summaries:
+                    entry = churn_index.get((summary['model'], summary['dataset'], summary['task']))
+                    if entry:
+                        summary.update(quality_basis='oversampled diagnostic; population metrics are weighted',
+                                       churn_predictive_fixed=entry['fixed'],
+                                       churn_predictive_selected=entry['selected'],
+                                       churn_threshold_selection=entry['threshold_selection'])
+        else:
+            from shve import baseline_records, BASELINE_VERSION
         baseline_rows = baseline_records(report["cases"], cfg)
         rule_cfg = copy.deepcopy(cfg)
         rule_cfg["models"] = [{"name":"rules", "display_name":"Deterministic rules", "enabled":True,
                                "api":"rules", "model":BASELINE_VERSION, "endpoint":"", "deployment":"local"}]
         decision["baseline_records"] = baseline_rows
         decision["baseline_summaries"] = b.summarize(baseline_rows, report["cases"], rule_cfg, bootstrap=300)[0]
-        decision["baseline_comparisons"] = baseline_comparisons(summaries,records,decision["baseline_summaries"],baseline_rows)
-        decision["baseline_basis"] = "Input-only deterministic rules; development vocabulary frozen before evaluation. Latency is local function time, not comparable HTTP latency. No paid API cost; hardware cost unknown."
+        comparison_summaries = [r for r in summaries if not improved or r['task'] != 'churn_prediction']
+        decision["baseline_comparisons"] = baseline_comparisons(comparison_summaries,records,decision["baseline_summaries"],baseline_rows)
+        decision["baseline_basis"] = ("Authored semantic tasks use a frozen simple control; beating it does not establish a general advantage over code. Churn uses a historical probability baseline frozen before confirmation. Latency is local function time, not comparable HTTP latency. No paid API cost; hardware cost unknown." if improved else
+            "Input-only deterministic rules; development vocabulary frozen before evaluation. Latency is local function time, not comparable HTTP latency. No paid API cost; hardware cost unknown.")
         rule_tasks = {"semantic_validation", "entity_match", "vision_routing", "data_gap_identification"}
         decision["baseline_interpretations"] = [
             {"dataset": row["dataset"], "task": row["task"],
@@ -77,7 +105,8 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
              "rules_success_rate": row["success_rate"]}
             for row in decision["baseline_summaries"]
             if row["task"] in rule_tasks and row["status"] == "complete" and row["success_rate"] == 1]
-        warnings_shve = ["Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
+        warnings_shve = ["Model routing measures target selection; downstream answer quality, savings and churn uplift were not measured." if improved else
+                         "Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
         manifest.setdefault("analysis_warnings", []).extend(warnings_shve)
     # Investigation notes remain in the audit artifacts, not in shared reports.
     warnings = list(dict.fromkeys(w for w in manifest.get("analysis_warnings", [])
@@ -91,7 +120,7 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
             "confusion": b.confusion_tables(records), "cases": report["cases"],
             "records": [{k: v for k, v in r.items() if k != "profile"} for r in records],
             "business": cfg.get("business", {}), "colors": {k:v for k,v in MODEL_COLORS.items() if k in profiles},
-            "study_design": study_design,
+            "study_design": study_design, "default_dataset": default_dataset,
             "decision_analysis": decision, "metric_guide": METRIC_GUIDE, "protocol": PROTOCOL_TEXT if "clm" in profiles else PROTOCOL_TEXT.replace(
                 "CLM embedding caches affect timings; record server cache/context settings.\n", "") }
 

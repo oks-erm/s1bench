@@ -1,0 +1,2 @@
+# Optional local parquet preparation; inference and offline analysis use stdlib.
+pyarrow==25.0.1

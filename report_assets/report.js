@@ -2,7 +2,7 @@
 const data=JSON.parse(document.getElementById('report-data').textContent);
 const L=ReportLogic, content=document.getElementById('content');
 const casesById=new Map(data.cases.map(c=>[c.id,c]));
-let baseline=data.baseline, dataset=data.study_design?'shve_v2_evaluation':'', cohort='', activeTab='Quality', volume=null;
+let baseline=data.baseline, dataset=data.default_dataset??(data.study_design?'shve_v2_evaluation':''), cohort='', activeTab='Quality', volume=null;
 const fallbackLabels=new Map();
 const labels={model:'Model',dataset:'Dataset',task:'Use case',planned:'Planned cases',attempted:'Attempted',families:'Families',
   success_rate:'Task success',success_ci_low:'Success CI low',success_ci_high:'Success CI high',delta_vs_baseline:'Gap vs reference',
@@ -18,12 +18,22 @@ const labels={model:'Model',dataset:'Dataset',task:'Use case',planned:'Planned c
   label_based_coverage:'Non-review-label coverage',threshold_coverage:'Threshold-qualified coverage',business_eligible_coverage:'Business-policy-eligible coverage',
   coverage:'Accepted coverage',review_rate:'Review / deferral demand',accepted_accuracy:'Accepted-subset accuracy',accepted_error_rate:'Accepted-subset error',
   accepted_ci_low:'Accepted accuracy CI low',accepted_ci_high:'Accepted accuracy CI high',threshold:'Exploratory threshold',
-  incremental_accuracy:'Model minus rules',model_api_per_1k:'Model API cost / 1k',model_p95_ms:'Model p95 (ms)'};
+  incremental_accuracy:'Model minus rules',model_api_per_1k:'Model API cost / 1k',model_p95_ms:'Model p95 (ms)',
+  probability_basis:'Operating point',roc_auc:'ROC-AUC',average_precision:'Average precision (step AP)',log_loss:'Log loss',
+  prediction_precision:'Precision',prediction_recall:'Recall (all planned positives)',prediction_f1:'Positive F1',prediction_specificity:'Specificity (all planned negatives)',
+  probability_coverage:'Probability coverage (population weighted)',sample_positive:'Sample positives',population_positive:'Represented population positives',
+  population_prevalence:'Represented population churn prevalence',represented_population:'Represented population',
+  sample_success_rate:'Sample task success (oversampled diagnostic)',sample_macro_f1:'Sample macro F1 (oversampled diagnostic)',sample_brier:'Sample Brier (oversampled diagnostic)',
+  quality_basis:'Quality interpretation',weighted_churn_roc_auc:'Weighted churn ROC-AUC',weighted_churn_ap:'Weighted churn average precision',
+  weighted_churn_brier:'Weighted churn Brier',weighted_churn_log_loss:'Weighted churn log loss',weighted_churn_recall:'Weighted churn recall at 0.5',
+  weighted_churn_precision:'Weighted churn precision at 0.5',weighted_churn_coverage:'Weighted churn probability coverage',
+  observed_churn:'Observed outcome',estimated_no_churn:'Predicted no churn',estimated_churn:'Predicted churn',estimated_invalid:'Invalid / unattempted'};
 const ratios=new Set(['success_rate','success_ci_low','success_ci_high','valid_rate','none_precision','none_recall','non_none_on_none_rate',
   'unsafe_upper95','auto_coverage','auto_accuracy','cost_coverage','fallback_rate','agreement','all_pairs_correct','all_runs_accuracy','valid_repeat_rate','repeat_agreement',
   'label_based_coverage','threshold_coverage','business_eligible_coverage','coverage','review_rate','accepted_accuracy','accepted_error_rate',
   'accepted_ci_low','accepted_ci_high','review_demand','rules_success_rate','accepted_critical_rate','precision','recall',
-  'simulated_cascade_success','simulated_cascade_fallback_rate']);
+  'simulated_cascade_success','simulated_cascade_fallback_rate','prediction_precision','prediction_recall','prediction_f1','prediction_specificity','probability_coverage','population_prevalence',
+  'weighted_churn_recall','weighted_churn_precision','weighted_churn_coverage','sample_success_rate']);
 function el(tag,text,cls){const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;}
 function heading(text){content.append(el('h2',text));}
 function note(text){content.append(el('p',text,'muted'));}
@@ -64,6 +74,14 @@ function selected(){return summaries().filter(r=>key(r)===cohort);}
 function cohortParts(){return JSON.parse(cohort);}
 function records(){const [d,t]=cohortParts();return data.records.filter(r=>r.dataset===d && r.task===t);}
 function allVisible(){return summaries().filter(r=>!dataset || r.dataset===dataset);}
+function churnFindings(){const [d,t]=cohortParts();return (data.decision_analysis?.churn_prediction||[]).filter(r=>r.dataset===d&&r.task===t);}
+function predictiveRow(entry,quality,basis){return {model:entry.model,probability_basis:basis,threshold:quality.operating_point.threshold,
+  ...quality.probability_metrics,prediction_precision:quality.operating_point.precision,prediction_recall:quality.operating_point.recall,
+  prediction_f1:quality.operating_point.f1,prediction_specificity:quality.operating_point.specificity,
+  probability_coverage:quality.coverage.weighted_probability_validity,planned:quality.sample.planned,
+  sample_positive:quality.sample.positive,population_positive:quality.population.positive,
+  represented_population:quality.population.represented,population_prevalence:quality.population.positive_prevalence};}
+const predictiveFields=['model','probability_basis','threshold','roc_auc','average_precision','brier','log_loss','prediction_precision','prediction_recall','prediction_f1','prediction_specificity','probability_coverage','planned','sample_positive','population_positive','represented_population','population_prevalence'];
 function color(alias,i){return data.colors[alias]||['#0072B2','#E69F00','#009E73','#8064C9','#D55E00','#56B4E9'][i%6];}
 function chart(rows,fields,title,percent=false){
   if(!rows.length){note('Charts require complete cohorts. See coverage in the table.');return;}
@@ -84,21 +102,39 @@ function renderFilters(){
   const parent=document.getElementById('filters');parent.replaceChildren();
   select('Reference model',Object.keys(data.summaries_by_reference).map(x=>[x,x]),baseline,parent,v=>{baseline=v;render();});
   const datasets=[...new Set(summaries().map(r=>r.dataset))].sort();
-  const splitLabel=x=>data.study_design?({'shve_v2_development':'Threshold selection','shve_v2_evaluation':'Performance evaluation'}[x]||x):x;
+  const splitLabel=x=>data.study_design?({'shve_v2_development':'Threshold selection','shve_v2_evaluation':'Performance evaluation','shve_improved_development':'Threshold selection','shve_improved_evaluation':'Performance evaluation'}[x]||x):x;
   select(data.study_design?'Data split':'Dataset',[['',data.study_design?'Both splits (shown separately)':'All datasets'],...datasets.map(x=>[x,splitLabel(x)])],dataset,parent,v=>{dataset=v;cohort='';volume=null;render();});
   const cohorts=[...new Map(allVisible().map(r=>[key(r),r])).entries()].sort((a,b)=>a[0].localeCompare(b[0]));
   if(!cohorts.some(([k])=>k===cohort))cohort=cohorts[0]?.[0]||'';
   select('Inspect one use case',cohorts.map(([k,r])=>[k,splitLabel(r.dataset)+' / '+r.task]),cohort,parent,v=>{cohort=v;volume=null;render();});
 }
 function overview(){heading('Business decision matrix');note('All use cases in the selected dataset. Every tab and case is included in this file, regardless of the view selected when it was exported.');
+  if(allVisible().some(r=>r.churn_predictive_fixed))note('Churn task success, reference gaps and acceptance accuracy are oversampled sample diagnostics. Use the weighted churn prediction fields for population estimates; probability metrics describe valid responses and must be read with coverage.');
   const interpretations=(data.decision_analysis?.baseline_interpretations||[]).filter(r=>!dataset||r.dataset===dataset);
   if(interpretations.length)table(interpretations,['dataset','task','rules_success_rate','interpretation']);
-  table(allVisible().map(r=>({...r,scenario_net_hours_saved:r.workflow_scenario?.net_hours_saved,scenario_review_hours:r.workflow_scenario?.review_hours,scenario_total_per_1k:r.workflow_scenario?.total_per_1k,scenario_currency:r.workflow_scenario?.currency})),['dataset','task','model','requested_model','effort','status','success_rate','delta_vs_baseline','delta_ci_low','delta_ci_high',
+  table(allVisible().map(r=>({...r,quality_basis:r.quality_basis||'Matched sample task metrics',
+    weighted_churn_roc_auc:r.churn_predictive_fixed?.probability_metrics.roc_auc,weighted_churn_ap:r.churn_predictive_fixed?.probability_metrics.average_precision,
+    weighted_churn_brier:r.churn_predictive_fixed?.probability_metrics.brier,weighted_churn_log_loss:r.churn_predictive_fixed?.probability_metrics.log_loss,
+    weighted_churn_recall:r.churn_predictive_fixed?.operating_point.recall,weighted_churn_precision:r.churn_predictive_fixed?.operating_point.precision,
+    weighted_churn_coverage:r.churn_predictive_fixed?.coverage.weighted_probability_validity,
+    scenario_net_hours_saved:r.workflow_scenario?.net_hours_saved,scenario_review_hours:r.workflow_scenario?.review_hours,scenario_total_per_1k:r.workflow_scenario?.total_per_1k,scenario_currency:r.workflow_scenario?.currency})),['dataset','task','model','requested_model','effort','status',...(data.decision_analysis?.churn_prediction?['quality_basis']:[]),'success_rate','delta_vs_baseline','delta_ci_low','delta_ci_high',
+    ...(data.decision_analysis?.churn_prediction?['weighted_churn_roc_auc','weighted_churn_ap','weighted_churn_brier','weighted_churn_log_loss','weighted_churn_recall','weighted_churn_precision','weighted_churn_coverage']:[]),
     'evaluation_scope','deployment_eligibility','label_based_coverage','threshold_coverage','business_eligible_coverage','outstanding_targets','blocked_business_decisions','deployment_recommendation','p95_ms','api_per_1k','currency','cost_coverage','scenario_net_hours_saved','scenario_review_hours','scenario_total_per_1k','scenario_currency','critical_failures','unsafe_decisions','risk_exposures','attempted','families','recommendation']);}
 function baselineInterpretation(){const [ds,t]=cohortParts();const finding=(data.decision_analysis?.baseline_interpretations||[]).find(r=>r.dataset===ds&&r.task===t);if(finding)note(finding.interpretation);}
-function quality(){heading('Quality');baselineInterpretation();chart(selected().filter(r=>r.status==='complete'),['success_rate'],'Task success on complete matched cohorts',true);
+function quality(){heading('Quality');baselineInterpretation();const churn=churnFindings();
+  if(churn.length){content.append(el('h3','Weighted churn prediction'));
+    if(data.study_design?.prediction_scope)note(data.study_design.prediction_scope);
+    note('Sampling weights restore monthly label proportions after rare-churn oversampling. ROC-AUC, noninterpolated step average precision, Brier and log loss use valid probabilities only. Coverage uses all planned population weight; invalid and missing predictions reduce recall. These measures do not establish retention uplift.');
+    const rows=churn.flatMap(entry=>[predictiveRow(entry,entry.fixed,'Fixed threshold 0.5'),...(entry.selected?[predictiveRow(entry,entry.selected,'Development-selected threshold')]:[])]);
+    chart(churn.map(entry=>predictiveRow(entry,entry.fixed,'Fixed threshold 0.5')),['roc_auc','average_precision'],'Population-weighted discrimination on valid probabilities',true);table(rows,predictiveFields);
+    for(const entry of churn){detail(entry.model+' · development-only threshold selection',entry.threshold_selection);detail(entry.model+' · fixed-threshold uncertainty',entry.fixed.uncertainty);if(entry.selected)detail(entry.model+' · selected-threshold uncertainty',entry.selected.uncertainty);}
+    content.append(el('h3','Oversampled sample diagnostics'));
+    note('The following task success, macro F1, Brier and reliability counts describe the oversampled sample; they are not population quality estimates.');
+    table(selected().map(r=>({...r,sample_success_rate:r.success_rate,sample_macro_f1:r.macro_f1,sample_brier:r.brier})),['model','planned','attempted','families','sample_success_rate','sample_macro_f1','sample_brier','valid_rate','api_errors','invalid_answers']);
+  }else{chart(selected().filter(r=>r.status==='complete'),['success_rate'],'Task success on complete matched cohorts',true);
   table(selected(),['model','planned','attempted','families','success_rate','success_ci_low','success_ci_high','ci_method','macro_f1','brier','mae','valid_rate','api_errors','invalid_answers',
     'none_precision','none_recall','non_none_on_none_rate','unsafe_decisions','risk_exposures','unsafe_upper95','risk_direction','auto_coverage','auto_accuracy']);
+  }
   note('Critical failures are test failures, not measured production harm. Missing values (—) are unavailable, not zero.');
   const [d,t]=cohortParts();content.append(el('h3','Repeat consistency'));table(data.stability.filter(r=>r.dataset===d && r.task===t));
   content.append(el('h3','Paired robustness checks'));table(data.robustness.filter(r=>r.dataset===d&&r.task===t));}
@@ -126,12 +162,18 @@ function fallback(){heading('Fallback scenario');const [d,t]=cohortParts(), rs=r
   if(!options.length)controls.append(el('p','No categorical labels for this use case. Invalid answers and API errors still trigger fallback.'));
   content.append(controls,out);draw();note('Offline replay using the selected reference model. Invalid answers and API failures always fall back. Requires complete matched cases in the same currency. Costs and latencies add serially; no model calls are made.');}
 function confusion(){heading('Confusion matrices');note('Rows are expected labels; columns are predictions. Primary attempts only. Missing requests are not counted.');const [d,t]=cohortParts();
-  const matrices=data.confusion.filter(r=>r.dataset===d && r.task===t);if(!matrices.length){note('Score tasks use numeric errors instead of a categorical confusion matrix. See Quality.');return;}
+  const churn=churnFindings(),matrices=data.confusion.filter(r=>r.dataset===d && r.task===t);if(!matrices.length){note(churn.length?'No primary attempts are available for an observed sample-count matrix.':'Score tasks use numeric errors instead of a categorical confusion matrix. See Quality.');if(!churn.length)return;}
   for(const matrix of matrices){content.append(el('h3',matrix.model));const counts=matrix.counts, names=[...new Set([...Object.keys(counts),...Object.values(counts).flatMap(Object.keys).filter(k=>k!=='(invalid/API error)')])].sort();
     const predicted=Object.values(counts).some(r=>'(invalid/API error)' in r)?[...names,'(invalid/API error)']:names;
     const maximum=Math.max(1,...Object.values(counts).flatMap(Object.values)),wrap=el('div',undefined,'table-wrap'),tableNode=el('table',undefined,'matrix'),head=el('tr');
     head.append(el('th','Expected ↓ / Predicted →'));for(const name of predicted)head.append(el('th',name));tableNode.append(head);
-    for(const gold of names){const row=el('tr');row.append(el('th',gold));for(const pred of predicted){const value=counts[gold]?.[pred]||0,ratio=value/maximum,td=el('td',String(value));td.style.background=`rgb(${239-Math.round(190*ratio)},${246-Math.round(130*ratio)},${255-Math.round(66*ratio)})`;td.style.color=ratio>=.55?'white':'#172b4d';row.append(td);}tableNode.append(row);}wrap.append(tableNode);content.append(wrap);}}
+    for(const gold of names){const row=el('tr');row.append(el('th',gold));for(const pred of predicted){const value=counts[gold]?.[pred]||0,ratio=value/maximum,td=el('td',String(value));td.style.background=`rgb(${239-Math.round(190*ratio)},${246-Math.round(130*ratio)},${255-Math.round(66*ratio)})`;td.style.color=ratio>=.55?'white':'#172b4d';row.append(td);}tableNode.append(row);}wrap.append(tableNode);content.append(wrap);}
+  if(churn.length){content.append(el('h3','Population-weighted estimated counts'));
+    note('Supplementary operating-point matrices estimate represented population counts from sampling weights. Invalid includes failed, invalid and unattempted cases; original matrices above retain actual observed sample counts.');
+    for(const entry of churn){for(const [quality,basis] of [[entry.fixed,'Fixed threshold 0.5'],...(entry.selected?[[entry.selected,'Development-selected threshold']]:[])]){
+      content.append(el('h3',entry.model+' · '+basis+' · '+quality.operating_point.threshold));
+      table(Object.entries(quality.operating_point.confusion_weighted).map(([actual,counts])=>({observed_churn:actual==='actual_true'?'Churn':'No churn',
+        estimated_no_churn:counts.predicted_false,estimated_churn:counts.predicted_true,estimated_invalid:counts.invalid})),['observed_churn','estimated_no_churn','estimated_churn','estimated_invalid']);}}}}
 function casesView(){heading('Cases and responses');note('Includes original inputs, frozen questions, normalized predictions and full saved responses. Case contents travel with this file.');
   const controls=el('div',undefined,'filters'),list=el('div'),inspection=el('div');content.append(controls,list,inspection);
   let model='',mode='failures',search='',page=0,all=false;
@@ -150,12 +192,14 @@ function casesView(){heading('Cases and responses');note('Includes original inpu
 function evidence(){heading('Profiles and evidence');note('Configured checkpoint provenance is not independent verification of server identity. The captured price basis and business settings apply throughout this report.');
   detail('Model profiles',data.profiles,content,true);detail('Applied prices and hosting assumptions',data.quotes);detail('Run evidence and analysis assumptions',data.manifest);}
 function protocol(){heading('Protocol and limitations');content.append(el('div',data.protocol.replaceAll('**',''),'protocol'));
+  if(data.decision_analysis?.churn_prediction)detail('Improved churn prediction scope and frozen protocol',{prediction_scope:data.study_design?.prediction_scope,churn_protocol:data.study_design?.churn_protocol,threshold_rule:data.study_design?.threshold_rule},content,true);
   detail('Captured protocol',data.manifest.protocol,content,true);content.append(el('h3','All repeat checks'));table(data.stability);content.append(el('h3','All paired robustness checks'));table(data.robustness);}
 function guide(){heading('Metric guide');const wrap=table(data.metric_guide.map(([metric,meaning])=>({metric,meaning})));if(wrap)wrap.classList.add('guide');}
 const acceptanceOverrides=new Map(), workflowSettings={...(data.decision_analysis?.workflow_cost||{})};
 function policyFor(row){return acceptanceOverrides.get(cohort)||row.acceptance_policy||{};}
 function numberControl(parent,label,value,onChange,max=null){const box=el('label',label,'control'),input=el('input');input.type='number';input.min='0';input.step='any';if(max!==null)input.max=String(max);input.value=value??'';input.setAttribute('aria-label',label);input.onchange=()=>{const v=input.value===''?null:Number(input.value);if(v===null||(L.finite(v)&&v>=0&&(max===null||v<=max)))onChange(v);else input.reportValidity();};box.append(input);parent.append(box);return input;}
 function acceptanceView(){heading('Acceptance and risk–coverage');
+  if(churnFindings().length)note('Acceptance, per-label and probability-quality fields in this view are oversampled sample diagnostics. Population-weighted churn prediction metrics and coverage are on Quality.');
   note('Label-based, threshold-qualified and business-policy-eligible coverage are different measures. Missing scores go to review. Score threshold automation is unsupported. These fixtures do not certify live automation.');
   const controls=el('div',undefined,'filters');content.append(controls);
   const initial=policyFor(selected()[0]);let p={...initial};
@@ -188,7 +232,10 @@ function workflow(){heading('Workflow economics');note('Editable assumptions. De
   draw();note('Blank inputs remain unknown. Local API charges of zero exclude hosting. Positive recurring savings are required for setup payback. Released staff capacity is not guaranteed cash savings. These scenarios use hypothetical acceptance, not organisational approval.');
 }
 function diagnosticsView(){heading('Dataset diagnostics');const d=data.decision_analysis?.diagnostics||{};detail('Counts, repeated templates and family overlap',Object.fromEntries(Object.entries(d).filter(([k])=>!['error_concentration','subgroups'].includes(k))),content,true);table((d.error_concentration||[]).filter(r=>!dataset||r.dataset===dataset));content.append(el('h3','Available subgroup results'));table((d.subgroups||[]).filter(r=>!dataset||r.dataset===dataset));note('Development/calibration/test family overlap needs review. Deliberate standard/stress variants may share families. Declared family IDs do not establish independent source customers. Small subgroups are descriptive.');}
-function baselineView(){heading('Deterministic baselines');baselineInterpretation();note(data.decision_analysis?.baseline_basis||'No deterministic baseline was supplied for this dataset.');const [ds,t]=cohortParts();const rules=(data.decision_analysis?.baseline_summaries||[]).filter(r=>r.dataset===ds&&r.task===t);table(rules,['model','dataset','task','success_rate','success_ci_low','success_ci_high','macro_f1','attempted','families','critical_failures','risk_exposures','p50_ms']);
+function baselineView(){heading('Deterministic baselines');baselineInterpretation();note(data.decision_analysis?.baseline_basis||'No deterministic baseline was supplied for this dataset.');const [ds,t]=cohortParts();const churn=churnFindings();
+ if(churn.length){content.append(el('h3','Historical probability baseline'));note('A constant historical churn probability is frozen before confirmation; this is a predictive reference, not a retention intervention or a semantic rule solver. Metrics are population weighted; discrimination and calibration use valid probabilities.');
+   table(churn.map(entry=>predictiveRow({model:entry.model+' · historical prior'},entry.baseline,'Frozen historical probability')),predictiveFields);return;}
+ const rules=(data.decision_analysis?.baseline_summaries||[]).filter(r=>r.dataset===ds&&r.task===t);table(rules,['model','dataset','task','success_rate','success_ci_low','success_ci_high','macro_f1','attempted','families','critical_failures','risk_exposures','p50_ms']);
  if(rules.length){table((data.decision_analysis?.baseline_comparisons||[]).filter(r=>r.dataset===ds&&r.task===t));}
  note('Per-task findings take priority. Pooled case accuracy weights cases; an unweighted task average weights each task equally. Rule-solvable tasks require demonstrated incremental benefit before adding model cost.');}
 
@@ -205,6 +252,7 @@ function completeReportHtml(){const page=document.documentElement.cloneNode(true
 function download(name,text,type){const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 document.getElementById('subtitle').textContent=data.run_name+' · Exported '+data.exported_utc.slice(0,10)+' · Reference at export: '+data.baseline;
 if(data.study_design){const design=el('details',undefined,'notice');design.append(el('summary','One dataset, two splits — what this run measures'));
+  if(data.study_design.prediction_scope)design.append(el('p',data.study_design.prediction_scope));
   design.append(el('p','No model training occurs in this benchmark. Threshold selection: '+data.study_design.split_counts.development+' cases. '+data.study_design.development_purpose),el('p','Performance evaluation: '+data.study_design.split_counts.evaluation+' cases. '+data.study_design.evaluation_purpose));
   for(const [name,requirement] of Object.entries(data.study_design.downstream_requirements))design.append(el('p',name.replaceAll('_',' ')+': '+requirement));
   design.append(el('p',data.study_design.additional_evidence));document.getElementById('notices').append(design);}
