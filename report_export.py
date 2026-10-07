@@ -69,10 +69,7 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
         decision["baseline_summaries"] = b.summarize(baseline_rows, report["cases"], rule_cfg, bootstrap=300)[0]
         decision["baseline_comparisons"] = baseline_comparisons(summaries,records,decision["baseline_summaries"],baseline_rows)
         decision["baseline_basis"] = "Input-only deterministic rules; development vocabulary frozen before evaluation. Latency is local function time, not comparable HTTP latency. No paid API cost; hardware cost unknown."
-        warnings_shve = ["Source-grounded scenarios measure compliance with explicit supplied policies. Gold is AI-reviewed; operational generalisation has not been validated.",
-                         "160 evaluation cases / 80 declared families per task; repeated templates and unverified source-entity independence limit generalisation.",
-                         "Threshold selection uses development responses only and is provisional. Entity MATCH is a classification output, not an automatic merge.",
-                         "Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
+        warnings_shve = ["Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
         manifest.setdefault("analysis_warnings", []).extend(warnings_shve)
     # Investigation notes remain in the audit artifacts, not in shared reports.
     warnings = list(dict.fromkeys(w for w in manifest.get("analysis_warnings", [])

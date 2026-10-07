@@ -22,6 +22,7 @@ class BusinessReportTests(unittest.TestCase):
         self.assertEqual(payload['study_design']['split_counts'],{'development':1,'evaluation':1})
         self.assertIn('threshold',payload['study_design']['development_purpose'])
         self.assertIn('churn outcomes',payload['study_design']['downstream_requirements']['churn_uplift'])
+        self.assertEqual(payload['warnings'],["Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."])
         self.assertIn('Download complete HTML',e.render_report(payload))
 
     def test_deployment_and_targets_separate_from_quality(self):

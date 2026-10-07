@@ -205,7 +205,7 @@ if(data.study_design){const design=el('details',undefined,'notice');design.appen
   design.append(el('p','No model training occurs in this benchmark. Threshold selection: '+data.study_design.split_counts.development+' cases. '+data.study_design.development_purpose),el('p','Performance evaluation: '+data.study_design.split_counts.evaluation+' cases. '+data.study_design.evaluation_purpose));
   for(const [name,requirement] of Object.entries(data.study_design.downstream_requirements))design.append(el('p',name.replaceAll('_',' ')+': '+requirement));
   design.append(el('p',data.study_design.additional_evidence));document.getElementById('notices').append(design);}
-if(data.warnings.length){const notices=el('details',undefined,'notice');notices.append(el('summary',data.warnings.length+' evidence limits and next validation steps'));
+if(data.warnings.length){const notices=el('details',undefined,'notice');notices.append(el('summary',data.warnings.length===1?'Evidence limit':data.warnings.length+' evidence limits and next validation steps'));
   for(const warning of data.warnings)notices.append(el('p',warning));document.getElementById('notices').append(notices);}
 for(const [value,label] of [[Object.keys(data.profiles).length,'Models'],[data.cases.length,'Dataset cases'],[data.records.length,'Recorded requests'],[new Set(data.cases.map(c=>c.task)).size,'Use cases']]){const card=el('div',undefined,'card');card.append(el('strong',value.toLocaleString()),el('span',label));document.getElementById('summary-cards').append(card);}
 const footer=document.getElementById('downloads'),actions=el('div',undefined,'actions');
