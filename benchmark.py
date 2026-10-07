@@ -110,7 +110,27 @@ def local_model(model):
     host = urllib.parse.urlsplit(model.get("endpoint", "")).hostname
     return model.get("api") in {"systemone", "ollama"} and host in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
+ENTRA_SCOPE = "https://cognitiveservices.azure.com/.default"
+_entra_providers = {}
+
+def entra_token(model):
+    """Bearer token for Azure AI Foundry via azure-identity (managed identity in Azure ML, az login locally)."""
+    scope = model.get("auth_scope") or ENTRA_SCOPE
+    provider = _entra_providers.get(scope)
+    if provider is None:
+        try:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+        except ImportError:
+            return ""
+        provider = _entra_providers[scope] = get_bearer_token_provider(DefaultAzureCredential(), scope)
+    try:
+        return provider()
+    except Exception:
+        return ""
+
 def model_key(model):
+    if model.get("auth") == "entra":
+        return entra_token(model)
     return str(model.get("api_key") or os.environ.get(model.get("api_key_env") or "", "")).strip()
 
 def model_problem(model):
@@ -1211,7 +1231,9 @@ def _run(cfg, cases, cancel=None, progress=None, selected=None, limit=None, outp
             alias = model["name"]
             problem = model_problem(model)
             if not problem and not local_model(model) and model.get("api") in {"systemone","openai"} and not model_key(model):
-                problem = "Missing API key. Use api_key directly or an api_key_env variable name."
+                problem = ("No Entra token. Install requirements-azure.txt and check the identity has Azure AI User on the Foundry resource."
+                           if model.get("auth") == "entra" else
+                           "Missing API key. Use api_key directly or an api_key_env variable name.")
             if problem:
                 availability[alias] = {"status":"skipped","detail":problem}
                 notify(alias+": "+problem)

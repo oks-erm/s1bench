@@ -134,6 +134,15 @@ class CoreTests(unittest.TestCase):
         self.assertNotIn("api_key",b.scrub_config(cfg)["models"][0])
         self.assertEqual(b.model_key({"api_key_env":"TEST_BENCH_KEY"}),"")
 
+    def test_entra_auth_uses_token_provider_and_fails_closed(self):
+        model = {**profile(),"auth":"entra","api_key":"ignored"}
+        with patch.dict(b._entra_providers,{b.ENTRA_SCOPE:lambda:"entra-token"}):
+            self.assertEqual(b.model_key(model),"entra-token")
+        def denied():
+            raise RuntimeError("no identity")
+        with patch.dict(b._entra_providers,{b.ENTRA_SCOPE:denied}):
+            self.assertEqual(b.model_key(model),"")
+
     def test_family_batches_and_partial_comparison(self):
         cases = [case("a",family="shared"),case("b",family="shared"),case("c")]
         batches = b.assign_batches(cases,2,42)

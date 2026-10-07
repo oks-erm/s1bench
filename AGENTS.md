@@ -82,6 +82,10 @@ are captured settings; only volume/fallback scenarios recalculate in the browser
 - Never commit secrets, `config.json`, `.env`, data, results, environments, or weights.
 - Local model profiles need no keys. Hosted profiles optionally use `JEV_API_KEY` and
   `OPENAI_API_KEY`; keep them disabled unless specifically requested.
+- `"auth": "entra"` profiles (Azure AI Foundry) get a bearer token from optional
+  `azure-identity` (`requirements-azure.txt`); keep that import lazy so the CLI stays
+  standard-library. Token failures fail closed as a skipped model. `azureml/job.yml`
+  runs the CLI in the Foundry workspace with the compute's managed identity; no keys.
 - Bind local servers to 127.0.0.1. Do not broaden access or weaken protections.
 - Preserve the existing system Ollama on port 11434; project Nimble uses port 11435.
 - Run one local model at a time on this 16 GB Mac. Stop an active run before switching;
