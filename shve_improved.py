@@ -260,7 +260,8 @@ def export_analysis(folder):
         interval=(f"{row['success_ci_low']:.1%}–{row['success_ci_high']:.1%}"
                   if b.finite(row['success_ci_low']) and b.finite(row['success_ci_high']) else 'unavailable')
         success=f"{row['success_rate']:.1%}" if row['status']=='complete' else 'incomplete'
-        lines.append(f"| {row['task']} | {row['model']} | {success} | {interval} | {row['valid_rate']:.1%} |")
+        validity=f"{row['valid_rate']:.1%}" if b.finite(row['valid_rate']) else 'unavailable'
+        lines.append(f"| {row['task']} | {row['model']} | {success} | {interval} | {validity} |")
     lines += ['', '## Population-weighted churn prediction',
               'Primary threshold is fixed at 0.5; supplementary operating points use calibration only. Scores use N/n sampling weights. Read probability metrics together with response coverage. The historical constant probability is a reference, not a trained tabular challenger.',
               '', '| Model | ROC-AUC | Average precision | Brier | Log loss | Valid probability coverage |',

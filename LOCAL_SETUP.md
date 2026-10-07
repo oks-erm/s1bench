@@ -99,6 +99,15 @@ It verifies evidence and preserves source references; combining makes no model c
 
 For standalone use of just one model server:
 
+On macOS, cloud storage can evict files inside this checkout, including hidden
+model environments. If startup stalls and `ls -lO PATH` shows `dataless`, restore
+the existing affected files before retrying. Finder's download/keep-downloaded
+action or `brctl download PATH` requests restoration without changing package or
+checkpoint versions. A folder request may leave children as placeholders; check
+the actual runtime and tokenizer files. Confirm `/health` reports the intended
+device and checkpoint revision before recovering missing benchmark requests.
+Preserve the partial run and never repeat a model that already completed.
+
 Double-click **Start Local.command**, then choose Laya, Nimble, or CLM.
 Alternatively, from this folder:
 

@@ -173,6 +173,9 @@ serves only the viewer and its HTML/CSV/JSON downloads. It never calls models or
 serves configuration files. This avoids in-app Blob-download failures. Downloaded
 HTML remains self-contained for sharing and opening in a standard browser; its
 offline download controls use that browser's native Blob support.
+The complete HTML includes both splits, all model responses and every report tab;
+one file is sufficient to share the whole comparison. Startup failures remain
+visible as unavailable metrics, including when an entire model has no attempts.
 See [DOWNSTREAM_EVALUATION.md](DOWNSTREAM_EVALUATION.md) for creating real routing,
 workflow-cost and churn evidence that the supplied classification cases cannot provide.
 Use [BUSINESS_BENCHMARK_BRIEF.md](BUSINESS_BENCHMARK_BRIEF.md) with the business and

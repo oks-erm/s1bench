@@ -37,16 +37,26 @@
 
 Files: shve_improved.py, tests/test_shve_improved.py, report_export.py, report_assets/report.js, tests/test_improved_report.py.
 
-- [ ] Test and implement run_config(existing, cases), prepare_suite(folder), baseline_records(cases, cfg), churn_summaries(records, cases, cfg), export_analysis(folder).
-- [ ] Freeze 1,360 primary cases, two warm-ups and 200 repeats per model: 6,248 requests across four models.
-- [ ] Reuse benchmark.run and combine_reports; verify recovery rejects complete models or changed frozen inputs.
-- [ ] Embed weighted churn quality and confusion alongside all existing tabs, metrics, colours and downloads; label unweighted churn tables as sample diagnostics.
-- [ ] Verify offline payload/export behavior and localhost downloads.
+- [x] Test and implement run_config(existing, cases), prepare_suite(folder), baseline_records(cases, cfg), churn_summaries(records, cases, cfg), export_analysis(folder).
+- [x] Freeze 1,360 primary cases, two warm-ups and 200 repeats per model: 6,248 requests across four models.
+- [x] Reuse benchmark.run and combine_reports; verify recovery rejects complete models or changed frozen inputs.
+- [x] Embed weighted churn quality and confusion alongside all existing tabs, metrics, colours and downloads; label unweighted churn tables as sample diagnostics.
+- [x] Verify offline payload/export behavior and localhost downloads.
 
 ### Task 3: Execution and delivery
 
-- [ ] Update README, SHVE_GUIDE, optional data dependencies, CI syntax and AGENTS.
-- [ ] Run full tests and syntax checks; independent review; fix important findings before inference.
-- [ ] Execute local models sequentially and hosted models once approved; recover incomplete models only.
-- [ ] Verify request counts, errors, model identities and frozen evidence; point owned report server at the combined run.
-- [ ] Explain observed winners and uncertainty using the latest complete evidence; focused local commit; no push.
+- [x] Update README, SHVE_GUIDE, optional data dependencies, CI syntax and AGENTS.
+- [x] Run full tests and syntax checks; independent review; fix important findings before inference.
+- [x] Execute local models sequentially and hosted models once approved; recover incomplete models only.
+- [x] Verify request counts, errors, model identities and frozen evidence; point owned report server at the combined run.
+- [x] Explain observed winners and uncertainty using the latest complete evidence; focused local commit; no push.
+
+## Completion verification — 7 October 2026
+
+- 137 full tests passed; Python, browser scripts and launcher syntax passed.
+- Four complete model protocols: 6,248 unique requests, no API errors or invalid answers.
+- Laya startup was recovered after restoring existing macOS cloud placeholders; no completed hosted or Nimble requests were repeated.
+- Frozen evidence and grading audits passed for the combined comparison. The interrupted original export and its checksum provenance are preserved separately.
+- All 14 viewer sections rendered; 56 confusion cohorts and weighted churn analysis are present.
+- HTML/CSV/JSON HTTP attachments returned 200; all three browser downloads succeeded. Downloaded HTML matches the complete export byte for byte and contains no configured keys.
+- Observed leaders are descriptive. Core tasks have 24 evaluation premise families; churn intervals are withheld because customer clusters cross sampling strata. Neither retrospective discrimination nor routing target selection establishes measured business uplift.

@@ -33,6 +33,26 @@ def config(sample):
 
 
 class ImprovedRunnerTests(unittest.TestCase):
+    def test_analysis_exports_unavailable_model_without_changing_evidence(self):
+        # A startup failure has no valid-answer denominator; exporting it must
+        # preserve unavailable values and the frozen zero-request evidence.
+        sample=cases();cfg=config(sample)
+        for model in cfg['models']:model['enabled']=model['name']=='laya'
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            b.save_report(folder,[],sample,cfg,{'laya':{'status':'unavailable','detail':'Startup timeout'}},
+                          repeat_ids=[c['id'] for c in sample[:100]],
+                          batches={c['id']:0 for c in sample},protocol=cfg['protocol'],
+                          plan=b.request_plan(sample,cfg),models=[cfg['models'][-1]],started=b.utc())
+            before={n:(folder/n).read_bytes() for n in
+                    ('raw.jsonl','data.snapshot.jsonl','config.snapshot.json','manifest.json')}
+            payload=s.export_analysis(folder)
+            self.assertIn('| incomplete | unavailable | unavailable |',
+                          (folder/'business_summary.md').read_text())
+            self.assertEqual(payload['decision_analysis']['churn_prediction'][0]
+                             ['fixed']['coverage']['weighted_probability_validity'],0)
+            self.assertEqual(before,{n:(folder/n).read_bytes() for n in before})
+
     def test_config_preserves_profiles_freezes_counts_and_observed_contract(self):
         sample = cases(); cfg = config(sample)
         self.assertEqual([m['name'] for m in cfg['models']], list(s.MODELS))
