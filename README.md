@@ -91,6 +91,19 @@ or unverified prices remain unknown. Results and exported HTML show the applied
 rates, source and estimated total for all phases; these are not provider invoices.
 Repricing preserves the original responses and frozen run evidence.
 
+## Azure AI Foundry
+
+Foundry deployments use the `openai` adapter with `"auth": "entra"`: requests carry an
+Entra token from `azure-identity` instead of an API key (managed identity inside Azure
+ML, `az login` elsewhere). Install `requirements-azure.txt`, copy
+`config.foundry.example.json` to `config.foundry.json`, and fill in the resource and
+deployment names. The identity needs Azure AI User (or Cognitive Services OpenAI User)
+on the Foundry resource.
+
+To run inside the Foundry workspace, register your JSONL as a data asset, fill the
+placeholders in `azureml/job.yml`, and submit it with `az ml job create -f azureml/job.yml`
+or Studio's Create job. Results land in the job's `results` output, including `report.html`.
+
 ## With your data
 
 Open **Plug your data** and upload labelled `.jsonl` files. The section includes a copyable AI preparation prompt and an example download. The included 1,400-case synthetic suite is for initial screening.

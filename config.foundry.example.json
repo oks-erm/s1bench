@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "timeout_s": 45,
+  "seed": 42,
+  "max_consecutive_errors": 3,
+  "protocol": {
+    "warmup_calls": 2,
+    "batches": 10,
+    "repeat_cases": 100,
+    "repetitions": 3,
+    "score_repeat_tolerance": 0.25,
+    "bootstrap_samples": 1000,
+    "max_requests": 10000
+  },
+  "business": {
+    "baseline": "foundry-gpt",
+    "max_quality_drop_pp": 2,
+    "min_cases": 200,
+    "min_families": 100,
+    "max_p95_ms": null,
+    "max_risk_percent": null,
+    "min_consistency_percent": null,
+    "monthly_volume": 100000,
+    "use_cases": {}
+  },
+  "tasks": {},
+  "models": [
+    {
+      "name": "foundry-gpt",
+      "display_name": "GPT (Foundry)",
+      "enabled": false,
+      "api": "openai",
+      "endpoint": "https://<resource>.openai.azure.com/openai/v1/responses",
+      "model": "<deployment-name>",
+      "auth": "entra",
+      "deployment": "hosted",
+      "params": {}
+    },
+    {
+      "name": "foundry-chat",
+      "display_name": "Chat model (Foundry)",
+      "enabled": false,
+      "api": "openai",
+      "endpoint": "https://<resource>.services.ai.azure.com/openai/v1/chat/completions",
+      "model": "<deployment-name>",
+      "auth": "entra",
+      "deployment": "hosted",
+      "params": {}
+    }
+  ]
+}
