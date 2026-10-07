@@ -105,9 +105,9 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
              "rules_success_rate": row["success_rate"]}
             for row in decision["baseline_summaries"]
             if row["task"] in rule_tasks and row["status"] == "complete" and row["success_rate"] == 1]
-        warnings_shve = ["Model routing measures target selection; downstream answer quality, savings and churn uplift were not measured." if improved else
-                         "Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
-        manifest.setdefault("analysis_warnings", []).extend(warnings_shve)
+        if not improved:
+            manifest.setdefault("analysis_warnings", []).append(
+                "Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured.")
     # Investigation notes remain in the audit artifacts, not in shared reports.
     warnings = list(dict.fromkeys(w for w in manifest.get("analysis_warnings", [])
                                   if not w.startswith(("Option-order robustness is unavailable", "CLM diagnostic:"))))

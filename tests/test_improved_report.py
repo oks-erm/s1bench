@@ -63,10 +63,13 @@ class ImprovedReportTests(unittest.TestCase):
         self.assertEqual(payload['study_design']['prediction_scope'], report['config']['shve_protocol']['prediction_scope'])
         json.dumps(payload, allow_nan=False)
 
-    def test_improved_evidence_limit_and_control_scope_are_explicit(self):
-        # A weak lexical control must not be presented as all possible code solutions.
-        payload = export.build_payload(self.fixture())
-        self.assertEqual(payload['warnings'], ['Model routing measures target selection; downstream answer quality, savings and churn uplift were not measured.'])
+    def test_improved_omits_generic_evidence_notice_and_preserves_other_warnings(self):
+        # Removing the requested notice must preserve unrelated analysis warnings
+        # and the scope of the limited lexical control.
+        report = self.fixture()
+        report['manifest']['analysis_warnings'] = ['Some requests have unknown costs.']
+        payload = export.build_payload(report)
+        self.assertEqual(payload['warnings'], ['Some requests have unknown costs.'])
         self.assertIn('frozen simple control', payload['decision_analysis']['baseline_basis'])
         self.assertIn('general advantage over code', payload['decision_analysis']['baseline_basis'])
 

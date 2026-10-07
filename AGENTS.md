@@ -143,6 +143,8 @@ retrospective supplied-label discrimination, not certified forecasting or uplift
 Lexical controls are deliberately limited; neural advantage over them is not proof
 of advantage over all code. Strict GPT schema is opt-in on Responses endpoints.
 Improved exports retain every existing report tab, metric, colour and download.
+Omit the generic improved-run Evidence limit banner as requested; retain metric
+definitions, study-design scope and unrelated analysis warnings.
 Complete model recovery is rejected. Audit saved evidence before analysis and never
 edit lazy-imported analysis APIs during an active run.
 `shve_recovery.py` resumes only missing warm-up/primary/repeat slots; it preserves
