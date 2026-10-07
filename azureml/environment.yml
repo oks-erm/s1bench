@@ -1,0 +1,8 @@
+name: s1bench
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - azure-identity>=1.19,<2  # keep in sync with requirements-azure.txt

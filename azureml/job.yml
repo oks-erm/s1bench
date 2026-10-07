@@ -1,0 +1,27 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+# Runs the CLI benchmark inside the Foundry workspace. The compute's managed identity
+# authenticates to Foundry deployments (auth: "entra"), so no API keys are uploaded.
+display_name: s1bench
+experiment_name: bench-s1
+code: ..
+command: >-
+  python benchmark.py
+  --config ${{inputs.config}}
+  --data ${{inputs.data}}
+  --out ${{outputs.results}}
+inputs:
+  config:
+    type: uri_file
+    path: ../config.foundry.json
+  data:
+    type: uri_file
+    path: azureml:<data-asset-name>:<version>
+outputs:
+  results:
+    type: uri_folder
+environment:
+  image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu22.04:latest
+  conda_file: environment.yml
+compute: azureml:<compute-cluster-name>
+identity:
+  type: managed

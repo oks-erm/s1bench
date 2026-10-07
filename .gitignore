@@ -1,4 +1,5 @@
 config.json
+config.foundry.json
 .venv/
 __pycache__/
 results/
