@@ -7,6 +7,30 @@ import report_export as e
 from test_benchmark import case, config, prediction, profile
 
 class BusinessReportTests(unittest.TestCase):
+    def test_policy_compliance_comment_is_scoped_to_rule_solvable_tasks(self):
+        semantic=case('semantic',expected='VALID')
+        semantic.update(task='semantic_validation',split='evaluation',dataset='shve_v2_evaluation',
+                        input={'record':{'MinFillLevel':1,'MaxFillLevel':2,'MaxCapacity':3,
+                                         'negative_ratio':0,'unit_metadata':dict.fromkeys(
+                                             ['MinFillLevel','MaxFillLevel','MaxCapacity'],'litres')}})
+        semantic['question']['criteria']={'VALID':'Checks pass','INVALID':'A check fails','CLARIFY':'Unknown'}
+        sector=case('sector',expected='CLARIFY')
+        sector.update(task='sector_imputation',split='evaluation',dataset='shve_v2_evaluation',
+                      input={'record':{'activity_note':'unknown'}})
+        sector['question']['criteria']={'Sector 1':'Industrial','CLARIFY':'Unknown'}
+        cfg=config(profile());cfg['shve_protocol']={'dataset_revision':'test'}
+        report={'folder':Path('test'),'config':cfg,'cases':[semantic,sector],
+                'records':[prediction(semantic,value='VALID'),prediction(sector,value='CLARIFY')],
+                'availability':{},'manifest':{}}
+        interpretations=e.build_payload(report)['decision_analysis'].get('baseline_interpretations',[])
+        self.assertEqual([(r['dataset'],r['task']) for r in interpretations],
+                         [('shve_v2_evaluation','semantic_validation')])
+        self.assertIn('policy compliance',interpretations[0]['interpretation'])
+        # A failed rules cohort cannot justify this interpretation.
+        semantic['expected']='INVALID'
+        interpretations=e.build_payload(report)['decision_analysis'].get('baseline_interpretations',[])
+        self.assertEqual(interpretations,[])
+
     def test_shve_report_explains_split_and_downstream_evidence(self):
         cases=[case('d',expected='CLARIFY'),case('e',expected='CLARIFY')]
         for c in cases:
@@ -22,6 +46,8 @@ class BusinessReportTests(unittest.TestCase):
         self.assertEqual(payload['study_design']['split_counts'],{'development':1,'evaluation':1})
         self.assertIn('threshold',payload['study_design']['development_purpose'])
         self.assertIn('churn outcomes',payload['study_design']['downstream_requirements']['churn_uplift'])
+        self.assertIn('need not be called',payload['study_design']['downstream_requirements']['routing_selection'])
+        self.assertIn('intervention/control trial',payload['study_design']['downstream_requirements']['churn_uplift'])
         self.assertEqual(payload['warnings'],["Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."])
         self.assertIn('Download complete HTML',e.render_report(payload))
 

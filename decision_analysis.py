@@ -295,7 +295,9 @@ def baseline_comparisons(summaries, records, rule_summaries, rule_records, *, sa
                        'directional_critical_errors':summary['critical_failures'],
                        'risk_exposures':summary.get('risk_exposures'),
                        'deployment_constraints':summary['deployment_recommendation'],
-                       'next_validation':'Human-adjudicated unseen templates, verified source independence and operational review/audit costs; downstream execution for Vision routing'})
+                       'next_validation':('Fresh topic-and-complexity cases with declared target capabilities; target execution is needed only for a separate downstream-quality study'
+                                          if key[1]=='vision_routing' else
+                                          'Human-adjudicated unseen templates, verified source independence and operational review/audit costs')})
     return output
 
 

@@ -56,9 +56,10 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
             "development_purpose": "Choose and freeze rules and probability thresholds; excluded from evaluation scores.",
             "evaluation_purpose": "Measure the frozen approach on separate cases; both splits belong to one SHVE dataset.",
             "downstream_requirements": {
-                "routing_quality": "Execute configured specialist models and compare their outputs against quality labels on the same requests.",
+                "routing_selection": "Test whether the model chooses the target specified by a declared topic-and-complexity policy. Target models need not be called for this selection test.",
+                "routing_quality": "Measuring downstream answer quality additionally requires executing the selected specialists and grading their outputs; this is separate from target-selection accuracy.",
                 "workflow_savings": "Measure manual, review, audit and rework time, hosting and specialist costs. Editable cost scenarios are estimates, not measured savings.",
-                "churn_uplift": "Longitudinal features and observed churn outcomes, with customer/time-separated train and test data, to compare predictive pipelines before and after data preparation."},
+                "churn_uplift": "A separate labelled monthly dataset can measure prediction quality against its supplied churn outcomes. Measuring retention uplift additionally requires an intervention/control trial; prediction accuracy alone does not establish uplift."},
             "additional_evidence": "This benchmark measures accuracy against explicit supplied rules; defining test rules does not require operational business approval. Operational adoption separately requires validated labels, source-entity lineage and approval for the actions taken. Changed rules should be tested as a new policy version, preserving the earlier results."}
         from shve import baseline_records, BASELINE_VERSION
         baseline_rows = baseline_records(report["cases"], cfg)
@@ -69,6 +70,13 @@ def build_payload(report, *, analysis_cfg=None, current_prices=None, analysis=No
         decision["baseline_summaries"] = b.summarize(baseline_rows, report["cases"], rule_cfg, bootstrap=300)[0]
         decision["baseline_comparisons"] = baseline_comparisons(summaries,records,decision["baseline_summaries"],baseline_rows)
         decision["baseline_basis"] = "Input-only deterministic rules; development vocabulary frozen before evaluation. Latency is local function time, not comparable HTTP latency. No paid API cost; hardware cost unknown."
+        rule_tasks = {"semantic_validation", "entity_match", "vision_routing", "data_gap_identification"}
+        decision["baseline_interpretations"] = [
+            {"dataset": row["dataset"], "task": row["task"],
+             "interpretation": "Those results currently demonstrate policy compliance; they do not demonstrate an advantage over straightforward code.",
+             "rules_success_rate": row["success_rate"]}
+            for row in decision["baseline_summaries"]
+            if row["task"] in rule_tasks and row["status"] == "complete" and row["success_rate"] == 1]
         warnings_shve = ["Vision is policy classification only; downstream routing quality, savings and churn uplift were not measured."]
         manifest.setdefault("analysis_warnings", []).extend(warnings_shve)
     # Investigation notes remain in the audit artifacts, not in shared reports.

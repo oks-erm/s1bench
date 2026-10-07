@@ -8,6 +8,29 @@ current frozen run; do not replace its labels or claim a fresh holdout after tun
 
 ## Routing experiment
 
+### Topic and complexity target selection
+
+Target selection is a standalone classification benchmark. Define target roles and
+their capabilities in the rubric: a typed model for bounded decisions, a weaker
+GPT for straightforward grounded transformations, and a stronger GPT for dependent
+reasoning, conflicting evidence or multi-constraint synthesis. These are declared
+experimental capabilities, not measured performance guarantees. Exact deployment
+IDs and calls to the target models are unnecessary for this test.
+
+Use synthetic energy requests with different complexity levels within each topic,
+including short difficult requests and long straightforward ones. Freeze the
+selection policy and gold routes before inference. Measure target-selection
+accuracy, per-target precision/recall, confusion matrices, stronger-target misses,
+unnecessary escalation and paired paraphrase consistency. Calling the models being
+evaluated as selectors has the usual benchmark cost; it does not require running
+the selected specialists. Do not present selection accuracy as downstream answer
+quality or measured cost savings.
+
+### Optional end-to-end experiment
+
+The following steps measure downstream solver quality separately. They are not
+prerequisites for the target-selection benchmark requested by the user.
+
 1. Collect representative real requests, authorised for the intended endpoints. Record
    request ID, task, policy constraints, language, source group and request time. Keep
    credentials and identifying fields outside benchmark inputs.
@@ -34,11 +57,38 @@ priced_cost, currency, reviewer_grade, review_seconds, rework_seconds`.
 
 ## Churn experiment
 
-1. Agree what churn means and its forecast horizon. Export feature snapshots taken
-   before each prediction date and observed outcomes after the horizon. Include
-   stable pseudonymised customer IDs and source lineage for grouping; keep raw
-   identifiers outside model inputs. Missing observation follow-up is not a negative
-   churn label.
+The supplied full parquet contains `ChurnNextMonth`, monthly snapshots and stable
+pseudonymised IDs. It is sufficient to start an evaluation against that supplied
+target even when the label-generation query is unavailable. State this outcome
+definition in the protocol; do not substitute a different definition or infer
+retention uplift from it. Use the anonymised file locally, keep target/identifiers
+out of predictive features, and quarantine the latest potentially immature months.
+The October 2026 local review proposes January 2024–December 2025 for fitting,
+January–March 2026 for calibration and April–July 2026 for confirmation. These
+boundaries are experimental choices, not verified outcome-maturity guarantees.
+
+Observed formats, ranges and conditional missingness can support declared data
+treatment rules. Physical unit conversions require additional evidence; omit
+uncertain conversions rather than block statistical prediction. Feed completeness
+means whether expected source records arrived, including zero-event periods;
+missing aggregates alone cannot establish that. User-supplied completeness rules
+can be versioned as experimental policy. No source query or unit dictionary is a
+prerequisite to testing these declared policies.
+
+For the supplied support extract, the user confirmed on 7 October 2026 that the
+monthly extract is complete and null support fields mean no events. Derived
+complaint counts may therefore be zero. With no events, sentiment and event ratios
+are not applicable; preserve missing values instead of manufacturing neutral
+sentiment or dividing by zero. This source interpretation does not replace the
+gold labels in the earlier constructed-policy benchmark.
+
+1. For the supplied-data experiment, use `ChurnNextMonth` unchanged as the target
+   and the existing customer/month snapshots. Document that its operational event
+   definition and extraction cutoff are unverified; this does not prevent measuring
+   prediction against the supplied labels. If a later experiment reconstructs the
+   target, agree the event and forecast horizon and collect subsequent outcomes.
+   Missing observation follow-up is not a negative churn label. Keep customer IDs
+   for grouping only, outside predictive features and model inputs.
 2. Check outcome completeness and leakage. Do not include future cancellation,
    account closure, future transactions, churn labels or outcome-derived fields in
    the data-preparation prompts or predictive features.
@@ -55,10 +105,12 @@ priced_cost, currency, reviewer_grade, review_seconds, rework_seconds`.
    preparation cost and latency. Predictive improvements are not revenue uplift;
    that needs a separate intervention/control trial and observed business outcomes.
 
-Suggested snapshot table: `customer_id, source_group_id, snapshot_date,
+For a future reconstruction, the suggested snapshot table is:
+`customer_id, source_group_id, snapshot_date,
 feature_* (available at snapshot), observation_end_date, churn_event_date`.
 Derive the outcome using the agreed horizon; document censoring, follow-up and
-missingness. Do not fabricate outcomes from the current scenario labels.
+missingness. This reconstruction is optional for the supplied-label experiment.
+Do not fabricate outcomes from the current scenario labels.
 
 ## Measuring workflow savings
 
@@ -69,7 +121,7 @@ and cost with the measured baseline at the same workload and quality requirement
 Editable report assumptions provide an initial capacity estimate; they do not replace
 this measurement or guarantee a payroll reduction.
 
-Before starting a new experiment, choose the actual specialist deployments, outcome
+Before starting an end-to-end operational experiment, choose the actual specialist deployments, outcome
 definition, baseline, minimum meaningful improvement, budget and data-sharing scope.
 Use these to determine the required sample, rather than copying the scenario counts.
 
@@ -86,8 +138,10 @@ purchase/delivery and customer-lineage records, observation windows and known da
 gaps. Finance should validate customer value, intervention cost and the distinction
 between released capacity and realised savings.
 
-For routing, the workflow owner and technical lead should identify the actual
+For end-to-end routing, the workflow owner and technical lead should identify the actual
 specialist services, eligibility constraints and quality reviewers. Ask which
 decision or output the routing workflow must deliver, and which errors require
 human review. This determines a runnable experiment rather than another route-label
-classification test.
+classification test. For the standalone selection test, declared target-role
+capabilities and synthetic requests are sufficient; no actual specialist deployment
+or execution is required.
